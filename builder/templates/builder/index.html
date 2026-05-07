@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATS Resume Builder</title>
+    <style>
+        :root {
+            --bg-body: #f5f2eb;
+            --bg-surface: #ffffff;
+            --bg-surface-strong: #ffffff;
+            --text-main: #141414;
+            --text-muted: #6c6963;
+            --text-soft: #8b867d;
+            --border-color: rgba(20, 20, 20, 0.11);
+            --border-strong: rgba(20, 20, 20, 0.22);
+            --btn-bg: #111111;
+            --btn-hover: #2b2b2b;
+            --btn-text: #ffffff;
+            --accent: #f1ebdf;
+            --accent-line: #d7c4a9;
+
+            --space-xs: 0.5rem;
+            --space-sm: 1rem;
+            --space-md: 1.5rem;
+            --space-lg: 2.5rem;
+            --space-xl: 4rem;
+
+            --font-body: "Avenir Next", "Segoe UI", sans-serif;
+            --font-heading: "Helvetica Neue", "Avenir Next", sans-serif;
+            --font-size-base: 16px;
+            --radius-sm: 10px;
+            --radius-md: 18px;
+            --shadow-soft: 0 10px 24px rgba(35, 30, 23, 0.06);
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            background-image:
+                radial-gradient(circle at top left, rgba(255, 255, 255, 0.98), transparent 30%),
+                radial-gradient(circle at top right, rgba(241, 235, 223, 0.55), transparent 24%),
+                linear-gradient(180deg, #faf9f6 0%, #f4f0e8 100%);
+            font-family: var(--font-body);
+            font-size: var(--font-size-base);
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 1220px;
+            margin: 0 auto;
+            padding: 28px 24px 56px;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: var(--font-heading);
+            font-weight: 700;
+            margin-top: 0;
+            margin-bottom: var(--space-sm);
+            letter-spacing: -0.02em;
+        }
+
+        h1 {
+            font-size: clamp(2.85rem, 4.8vw, 4.45rem);
+            line-height: 0.92;
+            margin-bottom: 1rem;
+            max-width: 8ch;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1.2rem;
+            color: var(--text-main);
+        }
+
+        p {
+            color: var(--text-muted);
+            margin-bottom: var(--space-md);
+        }
+
+        .hero {
+            margin-bottom: 1.1rem;
+        }
+
+        .hero-copy {
+            max-width: 760px;
+            font-size: 1rem;
+            line-height: 1.6;
+            margin-bottom: 0;
+        }
+
+        .mode-tabs {
+            display: inline-flex;
+            gap: 0.45rem;
+            padding: 0.35rem;
+            margin: 1.45rem 0 1.45rem;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(20, 20, 20, 0.08);
+            box-shadow: 0 8px 20px rgba(46, 37, 26, 0.05);
+        }
+
+        .tab-button {
+            min-width: 215px;
+            padding: 0.9rem 1.2rem;
+            border-radius: 12px;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-main);
+            cursor: pointer;
+            font-family: var(--font-body);
+            font-size: 1rem;
+            font-weight: 700;
+            transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+        }
+
+        .tab-button:hover {
+            transform: translateY(-1px);
+        }
+
+        .tab-button.is-active {
+            background: var(--btn-bg);
+            color: var(--btn-text);
+            box-shadow: inset 0 -2px 0 rgba(255, 255, 255, 0.12);
+        }
+
+        .page-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.72fr) minmax(280px, 0.74fr);
+            gap: 1.1rem;
+            align-items: start;
+        }
+
+        .stack {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .section-block {
+            border: 1px solid var(--border-color);
+            background: var(--bg-surface);
+            padding: 1.25rem;
+            margin-bottom: 0;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-soft);
+        }
+
+        .section-block h2,
+        .sidebar-card h2 {
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            font-size: 1.05rem;
+        }
+
+        .section-subtitle {
+            margin: 0 0 0.95rem;
+            color: var(--text-soft);
+            font-size: 0.92rem;
+        }
+
+        .form-group {
+            margin-bottom: var(--space-sm);
+        }
+
+        label {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 0.45rem;
+            color: var(--text-main);
+        }
+
+        input[type="text"], input[type="email"], textarea, select {
+            width: 100%;
+            padding: 0.82rem 0.92rem;
+            font-family: var(--font-body);
+            font-size: 0.98rem;
+            border: 1px solid rgba(20, 20, 20, 0.12);
+            background: #ffffff;
+            color: var(--text-main);
+            border-radius: 10px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        textarea {
+            min-height: 104px;
+            resize: vertical;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 0.78rem 0.92rem;
+            border: 1px solid rgba(20, 20, 20, 0.12);
+            border-radius: 10px;
+            background: #ffffff;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: rgba(20, 20, 20, 0.45);
+            box-shadow: 0 0 0 4px rgba(210, 189, 160, 0.22);
+            transform: translateY(-1px);
+        }
+
+        .dynamic-list {
+            display: grid;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .list-item {
+            position: relative;
+            margin-bottom: 0;
+            padding: 1rem;
+            border: 1px solid rgba(20, 20, 20, 0.08);
+            border-radius: 14px;
+            background: #fcfcfb;
+        }
+
+        .list-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .btn {
+            display: inline-block;
+            background: var(--btn-bg);
+            color: var(--btn-text);
+            padding: 0.82rem 1.15rem;
+            font-size: 0.9rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            border: 1px solid transparent;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+        }
+
+        .btn:hover {
+            background: var(--btn-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border-color: rgba(20, 20, 20, 0.18);
+            color: var(--text-main);
+        }
+
+        .btn-outline:hover {
+            background: rgba(20, 20, 20, 0.06);
+            color: var(--text-main);
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.9rem;
+        }
+
+        .mt-md {
+            margin-top: var(--space-md);
+        }
+
+        .sidebar-card {
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            background: #ffffff;
+            padding: 1.2rem;
+            box-shadow: var(--shadow-soft);
+        }
+
+        .sidebar-card p:last-child {
+            margin-bottom: 0;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.32rem 0.72rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(20, 20, 20, 0.08);
+            color: var(--text-main);
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+
+        .sidebar-card.scratch-only {
+            display: block;
+        }
+
+        .sidebar-card .helper-row {
+            margin-top: 0.9rem;
+        }
+
+        .sidebar-note {
+            font-size: 0.88rem;
+            color: var(--text-soft);
+            margin-top: 0.7rem;
+        }
+
+        form {
+            margin-top: 0;
+        }
+
+        .submit-area {
+            margin-top: 1.15rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            background: #ffffff;
+            border: 1px solid rgba(20, 20, 20, 0.12);
+            padding: 1.15rem 1.2rem;
+            border-radius: 18px;
+            box-shadow: var(--shadow-soft);
+        }
+
+        .submit-copy h3 {
+            margin-bottom: 0.25rem;
+            font-size: 1.08rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .submit-copy p {
+            margin: 0;
+            font-size: 0.95rem;
+        }
+
+        .hidden-panel {
+            display: none;
+        }
+
+        .sidebar-stack {
+            display: grid;
+            gap: 0.9rem;
+            position: sticky;
+            top: 24px;
+        }
+
+        .helper-row {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .inline-check {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            font-size: 0.94rem;
+            color: var(--text-muted);
+        }
+
+        .inline-check input {
+            width: 18px;
+            height: 18px;
+            accent-color: #111111;
+        }
+
+        @media (max-width: 1024px) {
+            .page-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .sidebar-stack {
+                position: static;
+            }
+        }
+
+        @media (max-width: 720px) {
+            .container {
+                padding: 28px 16px 56px;
+            }
+
+            h1 {
+                font-size: 2.65rem;
+            }
+
+            .hero-copy {
+                font-size: 1rem;
+            }
+
+            .mode-tabs {
+                display: grid;
+                width: 100%;
+            }
+
+            .tab-button {
+                min-width: 0;
+                width: 100%;
+            }
+
+            .grid-2,
+            #cl_fields {
+                grid-template-columns: 1fr;
+            }
+
+            .submit-area {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .submit-area .btn {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <section class="hero">
+        <div class="eyebrow">ATS Optimized Resume Workflow</div>
+        <h1>ATS Resume Builder</h1>
+        <p class="hero-copy">A polished workspace for building or revising resumes with structured sections, cleaner hierarchy, and fast export to PDF, DOCX, or Google Docs.</p>
+    </section>
+
+    <form method="POST" action="{% url 'generate' %}" enctype="multipart/form-data" id="resume-form" target="_blank">
+        {% csrf_token %}
+
+        <div class="mode-tabs">
+            <button type="button" id="tab-scratch" class="tab-button is-active">Build from Scratch</button>
+            <button type="button" id="tab-revise" class="tab-button">Revise Existing Resume</button>
+        </div>
+
+        <input type="hidden" name="mode" id="form-mode" value="scratch">
+        <div class="page-layout">
+            <div class="stack">
+                <div id="mode-scratch-container" class="stack">
+                    <div class="section-block">
+                        <h2>Personal Information</h2>
+                        <p class="section-subtitle">Start with the core details recruiters scan first.</p>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="full_name">Full Name</label>
+                                <input type="text" id="full_name" name="full_name" placeholder="John Doe" class="scratch-req">
+                            </div>
+                            <div class="form-group">
+                                <label for="contact_info">Contact Info</label>
+                                <input type="text" id="contact_info" name="contact_info" placeholder="Email, phone, LinkedIn, portfolio" class="scratch-req">
+                            </div>
+                        </div>
+
+                        <div class="form-group mt-md">
+                            <label for="summary">Professional Summary</label>
+                            <textarea id="summary" name="summary" rows="4" placeholder="Write a concise summary that highlights your experience, strengths, and target role." class="scratch-req"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="section-block">
+                        <h2>Work Experience</h2>
+                        <p class="section-subtitle">Use strong action verbs and one accomplishment per line.</p>
+                        <div class="dynamic-list" id="experience-list">
+                            <div class="list-item">
+                                <div class="grid-2">
+                                    <div class="form-group"><label>Title</label><input type="text" name="exp_title[]" class="scratch-req" placeholder="Senior Software Engineer"></div>
+                                    <div class="form-group"><label>Company</label><input type="text" name="exp_company[]" class="scratch-req" placeholder="Google"></div>
+                                    <div class="form-group"><label>Location</label><input type="text" name="exp_location[]" class="scratch-req" placeholder="Mountain View, CA"></div>
+                                    <div class="form-group"><label>Dates</label><input type="text" name="exp_dates[]" class="scratch-req" placeholder="Jan 2020 - Present"></div>
+                                </div>
+                                <div class="form-group mt-md">
+                                    <label>Responsibilities & Bullets</label>
+                                    <textarea name="exp_bullets[]" rows="4" placeholder="Describe responsibilities and impact. Use one bullet per line."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline" id="add-experience">Add Another Experience</button>
+                    </div>
+
+                    <div class="section-block">
+                        <h2>Education</h2>
+                        <p class="section-subtitle">Keep the most relevant degree or certification details visible.</p>
+                        <div class="dynamic-list" id="education-list">
+                            <div class="list-item">
+                                <div class="grid-2">
+                                    <div class="form-group"><label>Institution</label><input type="text" name="edu_inst[]" class="scratch-req" placeholder="University of California, Berkeley"></div>
+                                    <div class="form-group"><label>Degree</label><input type="text" name="edu_deg[]" class="scratch-req" placeholder="B.S. Computer Science"></div>
+                                    <div class="form-group"><label>Location</label><input type="text" name="edu_loc[]" class="scratch-req" placeholder="Berkeley, CA"></div>
+                                    <div class="form-group"><label>Dates</label><input type="text" name="edu_dates[]" placeholder="2016 - 2020"></div>
+                                </div>
+                                <div class="form-group mt-md">
+                                    <label>Details</label>
+                                    <textarea name="edu_details[]" rows="2" placeholder="Honors, GPA, thesis, societies"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline" id="add-education">Add Another Education</button>
+                    </div>
+                </div>
+
+                <div id="mode-revise-container" class="stack hidden-panel">
+                    <div class="section-block">
+                        <h2>Revise Existing Resume</h2>
+                        <p class="section-subtitle">Upload a resume and describe how you want it rewritten or retargeted.</p>
+
+                        <div class="helper-row">
+                            <button type="button" id="source-upload" class="btn">Upload .docx</button>
+                            <button type="button" id="source-gdrive" class="btn btn-outline">Google Docs</button>
+                        </div>
+
+                        <input type="hidden" name="source_type" id="source_type" value="upload">
+
+                        <div id="upload-container" class="form-group mt-md">
+                            <label for="resume_upload">Upload Existing Resume (.docx)</label>
+                            <input type="file" name="resume_upload" id="resume_upload" accept=".docx">
+                        </div>
+
+                        <div id="gdrive-container" class="form-group mt-md hidden-panel">
+                            <label>Select Google Doc</label>
+                            <button type="button" id="btn-gdrive-picker" class="btn" style="background: #4285F4;">Select from Google Drive</button>
+                            <div id="gdrive-file-name" style="margin-top: 0.75rem; font-style: italic; color: #4285F4;"></div>
+                            <div id="native-picker-container" style="margin-top: 0.5rem; display: none;"></div>
+
+                            <input type="hidden" name="gdrive_file_id" id="gdrive_file_id">
+                            <input type="hidden" name="gdrive_access_token" id="gdrive_access_token">
+
+                            <label class="inline-check" style="margin-top: 1rem; text-transform: none; letter-spacing: 0; font-size: 0.95rem; font-weight: 500;">
+                                <input type="checkbox" name="gdrive_overwrite" id="gdrive_overwrite" value="yes">
+                                <span>Overwrite this Google Doc instead of creating a new one.</span>
+                            </label>
+                        </div>
+
+                        <div class="form-group mt-md">
+                            <label for="revision_notes">Revision Notes</label>
+                            <textarea name="revision_notes" id="revision_notes" rows="6" placeholder="Tailor this resume for a senior role, emphasize the strongest metrics, and tighten older experience."></textarea>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="sidebar-stack">
+                <div class="sidebar-card scratch-only" id="scratch-skills-card">
+                    <h2>Skills</h2>
+                    <p class="section-subtitle">Enter skills as a comma-separated list for ATS keyword matching.</p>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="skills">Skills</label>
+                        <textarea id="skills" name="skills" rows="4" placeholder="Python, Django, React, SQL, Docker" class="scratch-req"></textarea>
+                    </div>
+                </div>
+
+                <div class="sidebar-card">
+                    <h2>Generation Options</h2>
+                    <p class="section-subtitle">Choose how the final resume package should be produced.</p>
+                    <div class="form-group">
+                        <label for="format">Download Format</label>
+                        <select name="format" id="format">
+                            <option value="pdf">PDF Document</option>
+                            <option value="docx">Word (.docx)</option>
+                            <option value="both">Both (ZIP)</option>
+                            <option value="gdocs">Open in Google Docs</option>
+                        </select>
+                    </div>
+
+                    <label class="inline-check" style="text-transform: none; letter-spacing: 0; font-size: 0.95rem; font-weight: 500; margin-bottom: 0;">
+                        <input type="checkbox" name="generate_cl" id="generate_cl" onchange="document.getElementById('cl_fields').style.display = this.checked ? 'grid' : 'none';">
+                        <span>Generate cover letter</span>
+                    </label>
+
+                    <div id="cl_fields" class="grid-2 mt-md" style="display: none; padding-top: 1rem; border-top: 1px dashed var(--border-color);">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="target_role">Target Role</label>
+                            <input type="text" name="target_role" id="target_role" placeholder="Senior Software Engineer">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="target_company">Target Company</label>
+                            <input type="text" name="target_company" id="target_company" placeholder="Google">
+                        </div>
+                    </div>
+                </div>
+
+            </aside>
+        </div>
+
+        <div class="submit-area">
+            <div class="submit-copy">
+                <h3>Ready to Generate</h3>
+                <p>Export a polished resume package in the format you need.</p>
+            </div>
+            <button type="submit" id="submit-btn" class="btn" style="padding: 1rem 2rem; font-size: 1rem; min-width: 280px;">Build & Generate Documents</button>
+        </div>
+    </form>
+</div>
+
+<!-- Ensure only one copy of Google APIs is loaded -->
+<script>
+    // Tab switching logic
+    const tabRevise = document.getElementById('tab-revise');
+    const tabScratch = document.getElementById('tab-scratch');
+    const panelRevise = document.getElementById('mode-revise-container');
+    const panelScratch = document.getElementById('mode-scratch-container');
+    const formMode = document.getElementById('form-mode');
+    const uploadInput = document.getElementById('resume_upload');
+    const scratchReqs = document.querySelectorAll('.scratch-req');
+    const submitBtn = document.getElementById('submit-btn');
+    const scratchSkillsCard = document.getElementById('scratch-skills-card');
+
+    function setMode(mode) {
+        formMode.value = mode;
+        if (mode === 'revise') {
+            tabRevise.classList.add('is-active');
+            tabScratch.classList.remove('is-active');
+
+            panelRevise.style.display = 'block';
+            panelScratch.style.display = 'none';
+            scratchSkillsCard.style.display = 'none';
+
+            uploadInput.required = true;
+            scratchReqs.forEach(el => el.required = false);
+            submitBtn.textContent = 'Revise & Generate Documents';
+
+        } else {
+            tabScratch.classList.add('is-active');
+            tabRevise.classList.remove('is-active');
+
+            panelScratch.style.display = 'block';
+            panelRevise.style.display = 'none';
+            scratchSkillsCard.style.display = 'block';
+
+            uploadInput.required = false;
+            scratchReqs.forEach(el => el.required = true);
+            submitBtn.textContent = 'Build & Generate Documents';
+        }
+    }
+
+    tabRevise.addEventListener('click', () => setMode('revise'));
+    tabScratch.addEventListener('click', () => setMode('scratch'));
+
+    // Initialize default mode
+    setMode('scratch');
+
+    // Revise Source Toggling
+    const sourceUpload = document.getElementById('source-upload');
+    const sourceGdrive = document.getElementById('source-gdrive');
+    const containerUpload = document.getElementById('upload-container');
+    const containerGdrive = document.getElementById('gdrive-container');
+    const sourceType = document.getElementById('source_type');
+
+    function setSource(mode) {
+        sourceType.value = mode;
+        if (mode === 'upload') {
+            sourceUpload.classList.remove('btn-outline');
+            sourceGdrive.classList.add('btn-outline');
+            containerUpload.style.display = 'block';
+            containerGdrive.style.display = 'none';
+            if (formMode.value === 'revise') uploadInput.required = true;
+        } else {
+            sourceGdrive.classList.remove('btn-outline');
+            sourceUpload.classList.add('btn-outline');
+            containerGdrive.style.display = 'block';
+            containerUpload.style.display = 'none';
+            uploadInput.required = false;
+        }
+    }
+
+    sourceUpload.addEventListener('click', () => setSource('upload'));
+    sourceGdrive.addEventListener('click', () => setSource('gdrive'));
+
+    // JavaScript for adding dynamic DOM items
+    document.getElementById('add-experience').addEventListener('click', function() {
+        const list = document.getElementById('experience-list');
+        const item = list.querySelector('.list-item').cloneNode(true);
+        item.querySelectorAll('input, textarea').forEach(el => el.value = '');
+        list.appendChild(item);
+    });
+
+    document.getElementById('add-education').addEventListener('click', function() {
+        const list = document.getElementById('education-list');
+        const item = list.querySelector('.list-item').cloneNode(true);
+        item.querySelectorAll('input, textarea').forEach(el => el.value = '');
+        list.appendChild(item);
+    });
+
+    // --- Google Drive 2026 Picker API ---
+    // According to Google's 2025/2026 GIS guidelines for 3rd-party cookie phaseout
+    const clientId = "{{ google_client_id }}";
+    const apiKey = "{{ google_api_key }}";
+    
+    let oauthToken = sessionStorage.getItem('gdrive_oauth_token');
+    let tokenClient;
+    let pickerInited = false;
+
+    // 1. Initialize the Google Picker API
+    function gapiLoaded() {
+        gapi.load('picker', { callback: () => { pickerInited = true; } });
+    }
+
+    // 2. Initialize Google Identity Services (GIS)
+    function gisLoaded() {
+        if (!clientId) {
+            console.error("Google Client ID not configured.");
+            return;
+        }
+        tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: 'https://www.googleapis.com/auth/drive.readonly',
+            callback: (response) => {
+                if (response.error !== undefined) {
+                    console.error("Auth error:", response.error);
+                    alert("Authentication Error: " + response.error);
+                    return;
+                }
+                oauthToken = response.access_token;
+                sessionStorage.setItem('gdrive_oauth_token', oauthToken);
+                document.getElementById('gdrive_access_token').value = oauthToken;
+                createPicker();
+            }
+        });
+    }
+
+    // Connect the UI button to authorization
+    document.getElementById('btn-gdrive-picker').addEventListener('click', (e) => {
+        e.preventDefault();
+        
+        if (!tokenClient || !pickerInited) {
+            alert('Google APIs are not properly loaded yet.');
+            return;
+        }
+
+        // Always go back through GIS so an expired cached token does not skip the
+        // login/consent flow and fail later with a Picker 403.
+        tokenClient.requestAccessToken({ prompt: oauthToken ? '' : 'consent' });
+    });
+
+    // 4. Construct and display the Google Drive Picker
+    function createPicker() {
+        if (!pickerInited || !oauthToken) {
+            console.error("Picker or Auth token missing.");
+            return;
+        }
+
+        try {
+            const view = new google.picker.DocsView(google.picker.ViewId.DOCUMENTS);
+            view.setMimeTypes('application/vnd.google-apps.document');
+
+            const picker = new google.picker.PickerBuilder()
+                .addView(view)
+                .setOAuthToken(oauthToken)
+                .setDeveloperKey(apiKey)
+                .setCallback((data) => {
+                    if (data.action === google.picker.Action.PICKED) {
+                        const documentId = data.docs[0].id;
+                        const documentName = data.docs[0].name;
+                        
+                        document.getElementById('gdrive_file_id').value = documentId;
+                        document.getElementById('gdrive-file-name').innerHTML = 
+                            `<span style="color: #4285F4; font-weight: bold;">Selected: ${documentName}</span>`;
+                    }
+                })
+                .build();
+                
+            picker.setVisible(true);
+        } catch (error) {
+            console.error("Picker error:", error);
+            alert("Google Picker failed to load.");
+        }
+    }
+
+</script>
+<script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+<script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+
+</body>
+</html>
