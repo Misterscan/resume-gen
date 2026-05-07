@@ -21,7 +21,7 @@ A Python application that generates and revises ATS-optimized resumes and tailor
 
 ```
 resume-gen/
-├── main.py              # Core CLI entrypoint and generation logic
+├── main.py              # Core CLI entrypoint and argument parsing
 ├── prompts.py           # System prompt definitions (Resume, Revision, Cover Letter)
 ├── manage.py            # Django management entrypoint
 ├── requirements.txt
@@ -32,9 +32,19 @@ resume-gen/
 │   ├── settings.py
 │   ├── urls.py
 │   └── wsgi.py
+├── services/            # Core Business Logic
+│   ├── llm.py           # Gemini API integrations
+│   ├── document.py      # PDF & DOCX generation via fpdf2 and python-docx
+│   ├── google_drive.py  # Google Docs API helpers
+│   ├── schemas.py       # Pydantic validation models
+│   └── exceptions.py    # Custom exception classes
+├── tests/               # Test Suite
+│   ├── test_document.py # Document generation and mocking tests
+│   ├── test_llm.py      # Pydantic schema validation and Gemini mocking
+│   └── test_google_drive.py # Drive API mocking
 ├── builder/             # Django app — Web UI
 │   ├── views.py
-│   ├── utils.py         # Bridge between Django and core main.py logic
+│   ├── utils.py         # Bridge between Django and services/
 │   ├── urls.py
 │   ├── apps.py
 │   └── templates/
@@ -43,6 +53,16 @@ resume-gen/
 ├── static/              # Static assets (CSS, JS, images)
 ├── examples/            # Sample output files for reference
 └── resumes/             # Default output directory for generated files
+```
+
+## Running Tests
+
+The application uses standard `unittest` to validate LLM schemas, JSON payloads, and mock PDF/DOCX streams without needing physical mock files or live API keys.
+
+To run the entire test suite:
+
+```bash
+python -m unittest discover tests
 ```
 
 ## Prerequisites
@@ -162,6 +182,8 @@ Expected output files:
 ```bash
 python main.py --input old_resume.docx --notes "Focus on Python and AI engineering. Tighten early career bullets." --output 'John Doe Updated Resume 2026'
 ```
+Example using 'John_Doe_Resume.docx' as input:
+[examples/John_Doe_Revised_Example.docx](examples/John_Doe_Revised_Example.docx)
 
 **Revise a newly generated resume:**
 ```bash
@@ -236,10 +258,10 @@ Files are saved into the `resumes/` directory by default (or the path specified 
 
 ```
 resumes/
-├── John Doe Resume.pdf
-├── John Doe Resume.docx
-├── John Doe Cover Letter.pdf
-└── John Doe Cover Letter.docx
+├── John_Doe_Resume.pdf
+├── John_Doe_Resume.docx
+├── John_Doe_Cover_Letter.pdf
+├── John_Doe_Cover_Letter.docx
 ```
 
 

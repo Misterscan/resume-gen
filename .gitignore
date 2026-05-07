@@ -39,3 +39,7 @@ client_secret.json
 *.log
 db.sqlite3
 *.db
+
+# Ignore test generated resume files
+examples/cli-test.docx
+examples/cli-test.pdf

@@ -2,9 +2,12 @@ import json
 import logging
 import tempfile
 import os
+import hashlib
+import requests
 from django.shortcuts import render, redirect
 from django.http import HttpResponse, JsonResponse, FileResponse
 from django.conf import settings
+from django.core.cache import cache
 from .utils import build_resume_from_payload
 from django.urls import reverse
 
@@ -51,8 +54,6 @@ def index(request):
         'google_client_id': client_id,
         'google_api_key': api_key
     })
-
-import hashlib
 
 def generate(request):
     """Handle form submission and trigger resume generation."""
@@ -141,7 +142,6 @@ def generate(request):
                     options["uploaded_file"] = tmp_file
             elif source_type == 'gdrive' and gdrive_file_id and gdrive_access_token:
                 try:
-                    import requests
                     # Export the GDoc as plain text for the AI
                     export_url = f"https://www.googleapis.com/drive/v3/files/{gdrive_file_id}/export?mimeType=text/plain"
                     headers = {"Authorization": f"Bearer {gdrive_access_token}"}
@@ -166,22 +166,30 @@ def generate(request):
         payload_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode('utf-8') + file_hash_content).hexdigest()
         
         if request.session.get('last_generation_hash') == payload_hash:
-            options['cached_resume'] = request.session.get('cached_resume')
-            options['cached_cover_letter'] = request.session.get('cached_cover_letter')
-            options['cached_raw_data'] = request.session.get('cached_raw_data')
+            cached_data = cache.get(payload_hash)
+            if cached_data:
+                options['cached_resume'] = cached_data.get('cached_resume')
+                options['cached_cover_letter'] = cached_data.get('cached_cover_letter')
+                options['cached_raw_data'] = cached_data.get('cached_raw_data')
 
         try:
             # Delegate to our main logic
-            file_path, filename, out_resume, out_cover_letter, out_raw_data = build_resume_from_payload(raw_data, options)
+            file_stream, filename, out_resume, out_cover_letter, out_raw_data = build_resume_from_payload(raw_data, options)
             
             # Save to cache
+            cache.set(payload_hash, {
+                'cached_resume': out_resume,
+                'cached_cover_letter': out_cover_letter,
+                'cached_raw_data': out_raw_data,
+            }, timeout=3600)  # 1 hour
             request.session['last_generation_hash'] = payload_hash
-            request.session['cached_resume'] = out_resume
-            request.session['cached_cover_letter'] = out_cover_letter
-            request.session['cached_raw_data'] = out_raw_data
             
             if original_format == "gdocs":
-                request.session['upload_file_path'] = file_path
+                fd, tmp_path = tempfile.mkstemp(suffix=".docx")
+                with os.fdopen(fd, 'wb') as f:
+                    f.write(file_stream.getvalue())
+                
+                request.session['upload_file_path'] = tmp_path
                 request.session['upload_file_name'] = filename
                 
                 # Check if we should overwrite
@@ -194,7 +202,7 @@ def generate(request):
             
             # Return the file, inline for PDFs so the browser can preview it
             is_pdf = filename.lower().endswith('.pdf')
-            response = FileResponse(open(file_path, 'rb'), as_attachment=not is_pdf, filename=filename)
+            response = FileResponse(file_stream, as_attachment=not is_pdf, filename=filename)
             if is_pdf:
                 response['Content-Disposition'] = f'inline; filename="{filename}"'
             return response
