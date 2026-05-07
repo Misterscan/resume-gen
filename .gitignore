@@ -6,8 +6,6 @@ __pycache__/
 # Output directories
 resumes/
 resume_output*/
-*.pdf
-*.docx
 
 # Virtual environments
 venv/
@@ -41,4 +39,3 @@ client_secret.json
 *.log
 db.sqlite3
 *.db
-
