@@ -10,7 +10,9 @@ from services import (
     get_google_credentials,
     get_gdoc_text,
     upload_to_gdoc,
+    verify_ats_compatibility
 )
+from services.filenames import sanitize_filename
 
 import argparse
 import json
@@ -18,21 +20,8 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-import io
+from typing import Any, Dict, List, Optional
 
-from prompts import (
-    RESUME_SYSTEM_PROMPT,
-    REVISION_SYSTEM_PROMPT,
-    COVER_LETTER_SYSTEM_PROMPT,
-)
-
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,6 +82,17 @@ def prompt_yes_no(label: str, default: str = "n") -> bool:
         if value in {"n", "no"}:
             return False
         print("Enter y or n.")
+
+
+def prompt_multiline(label: str) -> str:
+    print(f"{label} (Enter/Paste text. Type 'EOF' on a new line and press Enter when done):")
+    lines = []
+    while True:
+        line = input()
+        if line.strip() == "EOF":
+            break
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def collect_bullets() -> List[str]:
@@ -182,24 +182,22 @@ def get_user_input() -> Dict[str, Any]:
 # --- Call gemini json moved to services/ ---
 
 
-def get_base_path(output_arg: Optional[str], full_name: str, custom_dir: Optional[str] = None) -> Path:
-    if output_arg:
-        target = output_arg
-    elif full_name:
-        target = f"{full_name} Resume"
-    else:
-        target = "My Resume"
-    
-    target = target.replace("/", "_").replace("\\", "_")
-    output_path = Path(target).expanduser().resolve()
-    
+def get_base_path(
+    output_arg: Optional[str],
+    full_name: str,
+    custom_dir: Optional[str] = None,
+) -> Path:
+    target = output_arg or f"{full_name or 'My'} Resume"
+    safe_target = sanitize_filename(target)
+
     if custom_dir:
         output_folder = Path(custom_dir).expanduser().resolve()
     else:
-        output_folder = output_path.parent / "resumes"
-        
+        output_folder = Path.cwd() / "resumes"
+
     output_folder.mkdir(parents=True, exist_ok=True)
-    return output_folder / output_path.stem
+
+    return output_folder / Path(safe_target).stem
 
 def save_stream_to_disk(stream, path: Path):
     with open(path, "wb") as f:
@@ -261,6 +259,38 @@ def save_cover_letter_files(
         stream = generate_cover_letter_pdf_stream(cover_letter, raw_data)
         save_stream_to_disk(stream, cl_base_path.with_suffix(".pdf"))
 
+def maybe_run_ats_verification(
+    *,
+    args: argparse.Namespace,
+    resume: Dict[str, Any],
+    api_key: str,
+) -> None:
+    should_verify = args.verify or prompt_yes_no(
+        "Run ATS verification checker?",
+        default="n",
+    )
+
+    if not should_verify:
+        return
+
+    target_role = prompt_optional("Target Role for ATS check")
+    job_description = prompt_multiline(
+        "Paste Job Description (or leave blank for general check)"
+    )
+
+    logger.info("Running ATS verification...")
+    verification_report = verify_ats_compatibility(
+        resume=resume,
+        target_role=target_role,
+        job_description=job_description,
+        api_key=api_key,
+    )
+
+    if args.dry_run:
+        logger.info("DRY RUN: Outputting ATS Verification JSON:")
+        print(json.dumps(verification_report, indent=2))
+    else:
+        print_ats_verification_report(verification_report)
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -291,6 +321,11 @@ def parse_args() -> argparse.Namespace:
         "--cl",
         action="store_true",
         help="Automatically generate a tailored cover letter after resume creation or revision.",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Run ATS verification checker on the finalized resume.",
     )
     parser.add_argument(
         "--input",
@@ -361,6 +396,30 @@ def print_diff_summary(old: Dict[str, Any], new: Dict[str, Any]) -> None:
         if removed: logger.info(f"* Skills Removed: {', '.join(removed)}")
     logger.info("------------------------------------")
 
+def print_ats_verification_report(report: Dict[str, Any]) -> None:
+    logger.info("\n================ ATS VERIFICATION REPORT ================")
+    logger.info(f"ATS Score: {report.get('ats_score')}/100")
+    logger.info(f"Keyword Match Rate: {report.get('keyword_match_rate')}")
+    
+    if report.get('missing_keywords'):
+        logger.info("\nMissing Keywords:")
+        for kw in report.get('missing_keywords', []):
+            logger.info(f"  - {kw}")
+            
+    if report.get('formatting_feedback'):
+        logger.info("\nFormatting Feedback:")
+        for fb in report.get('formatting_feedback', []):
+            logger.info(f"  - {fb}")
+            
+    if report.get('content_feedback'):
+        logger.info("\nContent Feedback:")
+        for fb in report.get('content_feedback', []):
+            logger.info(f"  - {fb}")
+            
+    logger.info("\nOverall Recommendation:")
+    logger.info(f"  {report.get('overall_recommendation')}")
+    logger.info("=========================================================\n")
+
 
 def main() -> None:
     args = parse_args()
@@ -405,6 +464,7 @@ def main() -> None:
         else:
             base_path = get_base_path(args.output, raw_data.get("full_name", ""), args.dir)
             save_resume_files(resume, raw_data, base_path, args.format, args)
+            maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
 
         should_generate_cl = args.cl or prompt_yes_no(
             "Generate a tailored Cover Letter from the revised resume?",
@@ -463,6 +523,7 @@ def main() -> None:
     else:
         base_path = get_base_path(args.output, raw_data.get("full_name", ""), args.dir)
         save_resume_files(resume, raw_data, base_path, args.format, args)
+        maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
 
     should_generate_cl = args.cl or prompt_yes_no(
         "Generate a tailored Cover Letter from the final resume?",

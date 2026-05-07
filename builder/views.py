@@ -1,15 +1,31 @@
+import re
 import json
 import logging
 import tempfile
+from pathlib import Path
 import os
 import hashlib
 import requests
+import zipfile
+
+# Django Imports
 from django.shortcuts import render, redirect
 from django.http import HttpResponse, JsonResponse, FileResponse
 from django.conf import settings
 from django.core.cache import cache
-from .utils import build_resume_from_payload
+from django.core.files.uploadedfile import UploadedFile
+from django.core.exceptions import SuspiciousOperation
 from django.urls import reverse
+
+# Type Imports
+from dataclasses import dataclass
+
+# Local Imports
+from builder.utils import build_resume_from_payload, run_resume_workflow
+from builder.jobs import submit_job
+from services.filenames import sanitize_filename
+
+
 
 # Google API Imports
 try:
@@ -29,6 +45,20 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 CLIENT_SECRETS_FILE = os.path.join(settings.BASE_DIR, "client_secret.json")
+MAX_DOCX_UPLOAD_BYTES = 5 * 1024 * 1024
+DOCX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/octet-stream",
+}
+GOOGLE_FILE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{10,200}$")
+MAX_GDOC_TEXT_BYTES = 2 * 1024 * 1024
+TEMP_PREFIX = "resume-gen-export-"
+
+
+@dataclass(frozen=True)
+class UploadedResume:
+    path: str
+    sha256: str
 
 def index(request):
     """Render the Graphic-themed Resume Builder form."""
@@ -55,106 +85,191 @@ def index(request):
         'google_api_key': api_key
     })
 
+def safe_error_response(
+    request,
+    *,
+    log_message: str,
+    user_message: str = "The request could not be completed.",
+    status: int = 500,
+    as_json: bool = False,
+    exc: Exception | None = None,
+):
+    if exc:
+        logger.exception(log_message)
+    else:
+        logger.error(log_message)
+
+    if as_json:
+        return JsonResponse({"error": user_message}, status=status)
+
+    return HttpResponse(user_message, status=status)
+
+def validate_docx_upload(upload: UploadedFile) -> None:
+    name = upload.name or ""
+    if not name.lower().endswith(".docx"):
+        raise SuspiciousOperation("Only .docx files are supported.")
+
+    if upload.size and upload.size > MAX_DOCX_UPLOAD_BYTES:
+        raise SuspiciousOperation("Uploaded resume is too large.")
+
+    if upload.content_type and upload.content_type not in DOCX_MIME_TYPES:
+        raise SuspiciousOperation("Invalid DOCX content type.")
+
+
+def persist_docx_upload(upload: UploadedFile) -> UploadedResume:
+    validate_docx_upload(upload)
+
+    digest = hashlib.sha256()
+    total = 0
+
+    fd, tmp_path = tempfile.mkstemp(prefix="resume-upload-", suffix=".docx")
+    try:
+        with os.fdopen(fd, "wb") as tmp:
+            for chunk in upload.chunks():
+                total += len(chunk)
+                if total > MAX_DOCX_UPLOAD_BYTES:
+                    raise SuspiciousOperation("Uploaded resume is too large.")
+
+                digest.update(chunk)
+                tmp.write(chunk)
+
+        if not zipfile.is_zipfile(tmp_path):
+            raise SuspiciousOperation("Uploaded file is not a valid DOCX archive.")
+
+        return UploadedResume(path=tmp_path, sha256=digest.hexdigest())
+
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+def write_session_upload_file(request, file_stream, filename: str) -> None:
+    safe_name = sanitize_filename(filename)
+    suffix = Path(safe_name).suffix or ".docx"
+
+    fd, tmp_path = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(file_stream.getvalue())
+
+        request.session["upload_file_path"] = tmp_path
+        request.session["upload_file_name"] = safe_name
+        request.session.modified = True
+
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def cleanup_session_upload_file(request) -> None:
+    path = request.session.pop("upload_file_path", None)
+    request.session.pop("upload_file_name", None)
+    request.session.pop("gdrive_overwrite_id", None)
+
+    if path:
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("Failed to remove temporary upload file: %s", path)
+
+def parse_resume_form(request):
+    # Safely extract dynamic lists
+    titles = request.POST.getlist('exp_title[]')
+    companies = request.POST.getlist('exp_company[]')
+    locs = request.POST.getlist('exp_location[]')
+    dates = request.POST.getlist('exp_dates[]')
+    bullets = request.POST.getlist('exp_bullets[]')
+    
+    work_experience = []
+    for t, c, l, d, b in zip(titles, companies, locs, dates, bullets):
+        if t or c:
+            bullet_lines = [line.strip() for line in b.split('\n') if line.strip()]
+            work_experience.append({
+                "title": t,
+                "company": c,
+                "location": l,
+                "dates": d,
+                "bullets": bullet_lines
+            })
+            
+    edu_insts = request.POST.getlist('edu_inst[]')
+    edu_degs = request.POST.getlist('edu_deg[]')
+    edu_locs = request.POST.getlist('edu_loc[]')
+    edu_dates = request.POST.getlist('edu_dates[]')
+    edu_details = request.POST.getlist('edu_details[]')
+    
+    education = []
+    for ei, ed, el, edd, edit in zip(edu_insts, edu_degs, edu_locs, edu_dates, edu_details):
+        if ei or ed:
+            education.append({
+                "institution": ei,
+                "degree": ed,
+                "location": el,
+                "dates": edd,
+                "details": edit
+            })
+    
+    skills_raw = request.POST.get('skills', '')
+    skills_list = [s.strip() for s in skills_raw.split(',') if s.strip()]
+
+    raw_data = {
+        "full_name": request.POST.get('full_name', ''),
+        "contact_info": request.POST.get('contact_info', ''),
+        "summary": request.POST.get('summary', ''),
+        "work_experience": work_experience,
+        "education": education,
+        "skills": skills_list
+    }
+    
+    # Build Options
+    options = {
+        "format": request.POST.get('format', 'pdf'),
+        "generate_cl": request.POST.get('generate_cl') == 'on',
+        "target_role": request.POST.get('target_role', ''),
+        "target_company": request.POST.get('target_company', ''),
+        "job_description": request.POST.get('job_description', ''),
+        "revision_notes": request.POST.get('revision_notes', ''),
+        "mode": request.POST.get('mode', 'scratch')
+    }
+    
+    # Override format to docx if google docs is selected
+    if options["format"] == "gdocs":
+        options["format"] = "docx"
+        
+    source_type = request.POST.get('source_type', 'upload')
+    
+    file_hash_content = b"" 
+    
+    gdrive_file_id = request.POST.get('gdrive_file_id', '')
+    gdrive_access_token = request.POST.get('gdrive_access_token', '')
+    
+
+    if options["mode"] == "revise":
+        if source_type == "upload" and "resume_upload" in request.FILES:
+            uploaded = persist_docx_upload(request.FILES["resume_upload"])
+            options["uploaded_file"] = uploaded.path
+            file_hash_content = uploaded.sha256.encode("utf-8")
+        elif source_type == "gdrive" and gdrive_file_id and gdrive_access_token:
+            gdoc_text, gdoc_hash = export_google_doc_text(gdrive_file_id, gdrive_access_token)
+            options["gdrive_text"] = gdoc_text
+            file_hash_content = gdoc_hash.encode("utf-8")
+    
+    return raw_data, options, file_hash_content
+
+
 def generate(request):
     """Handle form submission and trigger resume generation."""
     if request.method == 'POST':
-        # Safely extract dynamic lists
-        titles = request.POST.getlist('exp_title[]')
-        companies = request.POST.getlist('exp_company[]')
-        locs = request.POST.getlist('exp_location[]')
-        dates = request.POST.getlist('exp_dates[]')
-        bullets = request.POST.getlist('exp_bullets[]')
-        
-        work_experience = []
-        for t, c, l, d, b in zip(titles, companies, locs, dates, bullets):
-            if t or c:
-                bullet_lines = [line.strip() for line in b.split('\n') if line.strip()]
-                work_experience.append({
-                    "title": t,
-                    "company": c,
-                    "location": l,
-                    "dates": d,
-                    "bullets": bullet_lines
-                })
-                
-        edu_insts = request.POST.getlist('edu_inst[]')
-        edu_degs = request.POST.getlist('edu_deg[]')
-        edu_locs = request.POST.getlist('edu_loc[]')
-        edu_dates = request.POST.getlist('edu_dates[]')
-        edu_details = request.POST.getlist('edu_details[]')
-        
-        education = []
-        for ei, ed, el, edd, edit in zip(edu_insts, edu_degs, edu_locs, edu_dates, edu_details):
-            if ei or ed:
-                education.append({
-                    "institution": ei,
-                    "degree": ed,
-                    "location": el,
-                    "dates": edd,
-                    "details": edit
-                })
-        
-        skills_raw = request.POST.get('skills', '')
-        skills_list = [s.strip() for s in skills_raw.split(',') if s.strip()]
+        raw_data, options, file_hash_content = parse_resume_form(request)
+        original_format = request.POST.get('format', 'pdf')
 
-        raw_data = {
-            "full_name": request.POST.get('full_name', ''),
-            "contact_info": request.POST.get('contact_info', ''),
-            "summary": request.POST.get('summary', ''),
-            "work_experience": work_experience,
-            "education": education,
-            "skills": skills_list
-        }
-        
-        # Build Options
-        options = {
-            "format": request.POST.get('format', 'pdf'),
-            "generate_cl": request.POST.get('generate_cl') == 'on',
-            "target_role": request.POST.get('target_role', ''),
-            "target_company": request.POST.get('target_company', ''),
-            "revision_notes": request.POST.get('revision_notes', ''),
-            "mode": request.POST.get('mode', 'scratch')
-        }
-        
-        # Override format to docx if google docs is selected
-        original_format = options["format"]
-        if options["format"] == "gdocs":
-            options["format"] = "docx"
-            
-        source_type = request.POST.get('source_type', 'upload')
-        
-        uploaded_file_path = None
-        file_hash_content = b""
-        
-        gdrive_file_id = request.POST.get('gdrive_file_id', '')
-        gdrive_access_token = request.POST.get('gdrive_access_token', '')
-        gdrive_overwrite = request.POST.get('gdrive_overwrite') == 'yes'
-
-        if options['mode'] == 'revise':
-            if source_type == 'upload' and 'resume_upload' in request.FILES:
-                upload = request.FILES['resume_upload']
-                if upload.name.endswith('.docx'):
-                    fd, tmp_file = tempfile.mkstemp(suffix='.docx')
-                    with os.fdopen(fd, 'wb') as f:
-                        for chunk in upload.chunks():
-                            f.write(chunk)
-                            file_hash_content += chunk
-                    options["uploaded_file"] = tmp_file
-            elif source_type == 'gdrive' and gdrive_file_id and gdrive_access_token:
-                try:
-                    # Export the GDoc as plain text for the AI
-                    export_url = f"https://www.googleapis.com/drive/v3/files/{gdrive_file_id}/export?mimeType=text/plain"
-                    headers = {"Authorization": f"Bearer {gdrive_access_token}"}
-                    response = requests.get(export_url, headers=headers)
-                    if response.status_code == 200:
-                        options["gdrive_text"] = response.text
-                        file_hash_content = response.text.encode('utf-8')
-                    else:
-                        logger.error(f"Failed to export GDoc: {response.status_code} {response.text}")
-                except Exception as e:
-                    logger.error(f"Error fetching GDoc: {str(e)}")
-        
-        # Calculate a state hash to cache the LLM output
         hash_payload = {
             "raw_data": raw_data,
             "mode": options["mode"],
@@ -185,20 +300,13 @@ def generate(request):
             request.session['last_generation_hash'] = payload_hash
             
             if original_format == "gdocs":
-                fd, tmp_path = tempfile.mkstemp(suffix=".docx")
-                with os.fdopen(fd, 'wb') as f:
-                    f.write(file_stream.getvalue())
-                
-                request.session['upload_file_path'] = tmp_path
-                request.session['upload_file_name'] = filename
-                
-                # Check if we should overwrite
-                if gdrive_overwrite and gdrive_file_id:
-                    request.session['gdrive_overwrite_id'] = gdrive_file_id
-                else:
-                    request.session['gdrive_overwrite_id'] = None
-                    
-                return redirect('google_login')
+                write_session_upload_file(request, file_stream, filename)
+                request.session["gdrive_overwrite_id"] = (
+                    request.POST.get("gdrive_file_id", "")
+                    if request.POST.get("gdrive_overwrite") == "yes"
+                    else None
+                )
+                return redirect("google_login")
             
             # Return the file, inline for PDFs so the browser can preview it
             is_pdf = filename.lower().endswith('.pdf')
@@ -207,11 +315,83 @@ def generate(request):
                 response['Content-Disposition'] = f'inline; filename="{filename}"'
             return response
             
-        except Exception as e:
-            logger.error(f"Failed to generate resume: {str(e)}")
-            return HttpResponse(f"Error generating resume: {str(e)}", status=500)
+        except Exception as exc:
+            return safe_error_response(
+                request,
+                log_message="Resume generation failed.",
+                user_message="Resume generation failed. Check your inputs and try again.",
+                status=500,
+                exc=exc,
+    )
             
     return HttpResponse("Method not allowed", status=405)
+
+
+def verify_ats(request):
+    if request.method == 'POST':
+        raw_data, options, file_hash_content = parse_resume_form(request)
+        
+        # We need the AI key to build and verify
+        api_key = os.environ.get('GEMINI_API_KEY')
+        if not api_key:
+            return JsonResponse({"error": "GEMINI_API_KEY is not configured."}, status=500)
+            
+        hash_payload = {
+            "raw_data": raw_data,
+            "mode": options["mode"],
+            "generate_cl": False, # no need to generate cover letter for ATS check
+            "target_role": options["target_role"],
+            "target_company": options["target_company"],
+            "revision_notes": options["revision_notes"]
+        }
+        payload_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode('utf-8') + file_hash_content).hexdigest()
+        
+        if request.session.get('last_generation_hash') == payload_hash:
+            cached_data = cache.get(payload_hash)
+            if cached_data:
+                options['cached_resume'] = cached_data.get('cached_resume')
+                options['cached_raw_data'] = cached_data.get('cached_raw_data')
+
+        try:
+            def run_ats_check():
+                workflow_result = run_resume_workflow(raw_data, options)
+                out_resume = workflow_result.resume
+                out_raw_data = workflow_result.raw_data
+                
+                cache.set(payload_hash, {
+                    'cached_resume': out_resume,
+                    'cached_cover_letter': None,
+                    'cached_raw_data': out_raw_data,
+                }, timeout=3600)
+                
+                from services import verify_ats_compatibility
+                return verify_ats_compatibility(
+                    resume=out_resume,
+                    target_role=options.get("target_role", ""),
+                    job_description=options.get("job_description", ""),
+                    api_key=api_key
+                )
+
+            job_id = submit_job(run_ats_check)
+            request.session['last_generation_hash'] = payload_hash
+            return JsonResponse({"job_id": job_id})
+            
+        except Exception as exc:
+            return safe_error_response(
+                request,
+                log_message="ATS verification failed.",
+                user_message="ATS verification failed. Check your inputs and try again.",
+                status=500,
+                as_json=True,
+                exc=exc,
+            )
+    return HttpResponse("Method not allowed", status=405)
+
+def check_job_status(request, job_id):
+    job_data = cache.get(f"job:{job_id}")
+    if not job_data:
+        return JsonResponse({"error": "Job not found or expired."}, status=404)
+    return JsonResponse(job_data)
 
 
 def google_login(request):
@@ -235,25 +415,38 @@ def google_login(request):
 
 
 def google_callback(request):
-    state = request.session.get('state')
-    code_verifier = request.session.get('code_verifier')
-    
-    if not state or not code_verifier:
-        return HttpResponse("Session state missing. Please try again.", status=400)
-        
+    expected_state = request.session.get("state")
+    returned_state = request.GET.get("state")
+    code_verifier = request.session.get("code_verifier")
+
+    if not expected_state or not code_verifier:
+        return HttpResponse("OAuth session expired. Please reconnect Google Drive.", status=400)
+
+    if not returned_state or returned_state != expected_state:
+        raise SuspiciousOperation("OAuth state mismatch.")
+
     flow = google_auth_oauthlib.flow.Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE, scopes=SCOPES, state=state)
-    flow.redirect_uri = request.build_absolute_uri(reverse('google_callback'))
-    
-    # Restore the code verifier
+        CLIENT_SECRETS_FILE,
+        scopes=SCOPES,
+        state=expected_state,
+    )
+    flow.redirect_uri = request.build_absolute_uri(reverse("google_callback"))
     flow.code_verifier = code_verifier
-    
-    authorization_response = request.build_absolute_uri()
+
     try:
-        flow.fetch_token(authorization_response=authorization_response)
-    except Exception as e:
-        return HttpResponse(f"Failed to fetch token: {str(e)}", status=400)
-        
+        flow.fetch_token(authorization_response=request.build_absolute_uri())
+    except Exception as exc:
+        return safe_error_response(
+            request,
+            log_message="Google OAuth token exchange failed.",
+            user_message="Google authorization failed. Please try again.",
+            status=400,
+            exc=exc,
+        )
+
+    request.session.pop("state", None)
+    request.session.pop("code_verifier", None)
+
     credentials = flow.credentials
     
     file_path = request.session.get('upload_file_path')
@@ -300,10 +493,53 @@ def google_callback(request):
         os.remove(file_path)
         
         # Redirect to the Google Doc!
-        return redirect(uploaded_file.get('webViewLink'))
-        
-    except Exception as e:
-         import traceback
-         error_trace = traceback.format_exc()
-         logger.error(f"Error uploading to Google Drive:\n{error_trace}")
-         return HttpResponse(f"Error uploading to Google Drive: {str(e)}<br><pre>{error_trace}</pre>", status=500)
+        return redirect(uploaded_file.get("webViewLink"))
+    except Exception as exc:
+        return safe_error_response(
+            request,
+            log_message="Google Drive upload failed.",
+            user_message="Google Drive upload failed.",
+            status=500,
+            exc=exc,
+        )
+    finally:
+        cleanup_session_upload_file(request)
+
+def export_google_doc_text(file_id: str, access_token: str) -> tuple[str, str]:
+    if not GOOGLE_FILE_ID_RE.fullmatch(file_id or ""):
+        raise SuspiciousOperation("Invalid Google file ID.")
+
+    if not access_token or len(access_token) > 4096:
+        raise SuspiciousOperation("Invalid Google access token.")
+
+    export_url = f"https://www.googleapis.com/drive/v3/files/{file_id}/export"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"mimeType": "text/plain"}
+
+    response = requests.get(
+        export_url,
+        headers=headers,
+        params=params,
+        timeout=(3.05, 20),
+        stream=True,
+    )
+
+    if response.status_code != 200:
+        raise SuspiciousOperation("Could not export selected Google Doc.")
+
+    digest = hashlib.sha256()
+    chunks: list[bytes] = []
+    total = 0
+
+    for chunk in response.iter_content(chunk_size=64 * 1024):
+        if not chunk:
+            continue
+
+        total += len(chunk)
+        if total > MAX_GDOC_TEXT_BYTES:
+            raise SuspiciousOperation("Google Doc export is too large.")
+
+        digest.update(chunk)
+        chunks.append(chunk)
+
+    return b"".join(chunks).decode("utf-8", errors="replace"), digest.hexdigest()

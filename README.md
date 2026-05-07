@@ -6,9 +6,10 @@ A Python application that generates and revises ATS-optimized resumes and tailor
 
 ## Features
 
-- **Resume Generation** — Enter your professional facts and let Gemini craft an ATS-friendly resume using the Google XYZ formula: *"Accomplished [X] as measured by [Y], by doing [Z]."*
+- **Resume Generation** — Enter your professional facts and let Gemini craft an ATS-friendly resume using the Google XYZ formula: _"Accomplished [X] as measured by [Y], by doing [Z]."_
 - **Cover Letter Generation** — Optionally generate a role-specific cover letter tailored to a target company and position.
 - **Resume Revision** — Feed an existing `.docx` or **Google Doc** with revision notes and let Gemini rewrite and improve it. Supports natural language instructions such as reordering jobs, rewriting the summary, or changing details.
+- **ATS Verification** — After generating or revising a resume, run it through a dedicated ATS checker powered by Gemini. The checker scores your resume out of 100, identifies missing keywords against a job description, and gives specific formatting and content feedback.
 - **Google Drive Integration** — Pick any Google Doc from your Drive directly in the browser via the **Google Picker API**, powered by Google Identity Services (GIS) and FedCM-compatible OAuth 2.0.
 - **Multiple Output Formats** — Export to `.pdf`, `.docx`, both simultaneously, or directly to **Google Docs** via the Google Drive API.
 - **Dry-Run Mode** — Preview the generated JSON output without writing any files.
@@ -22,9 +23,10 @@ A Python application that generates and revises ATS-optimized resumes and tailor
 ```
 resume-gen/
 ├── main.py              # Core CLI entrypoint and argument parsing
-├── prompts.py           # System prompt definitions (Resume, Revision, Cover Letter)
+├── prompts.py           # System prompt definitions (Resume, Revision, Cover Letter, ATS)
 ├── manage.py            # Django management entrypoint
 ├── requirements.txt
+├── pytest.ini           # Pytest configuration
 ├── client_secret.json   # Google OAuth credentials (gitignored)
 ├── .env                 # Environment variables — GEMINI_API_KEY, GOOGLE_CLOUD_API_KEY
 ├── .env.keys            # dotenvx encryption keys (gitignored)
@@ -33,18 +35,23 @@ resume-gen/
 │   ├── urls.py
 │   └── wsgi.py
 ├── services/            # Core Business Logic
-│   ├── llm.py           # Gemini API integrations
+│   ├── llm.py           # Gemini API integrations (resume, revision, cover letter, ATS)
 │   ├── document.py      # PDF & DOCX generation via fpdf2 and python-docx
 │   ├── google_drive.py  # Google Docs API helpers
-│   ├── schemas.py       # Pydantic validation models
+│   ├── schemas.py       # Pydantic validation models (incl. AtsVerificationSchema)
+│   ├── workflow.py      # Unified workflow for resume generation and revision
+│   ├── filenames.py     # Filename sanitization utilities
 │   └── exceptions.py    # Custom exception classes
 ├── tests/               # Test Suite
+│   ├── conftest.py      # Pytest fixtures and configuration
 │   ├── test_document.py # Document generation and mocking tests
 │   ├── test_llm.py      # Pydantic schema validation and Gemini mocking
-│   └── test_google_drive.py # Drive API mocking
+│   ├── test_google_drive.py # Drive API mocking
+│   └── test_security.py # Validation and boundary security testing
 ├── builder/             # Django app — Web UI
-│   ├── views.py
+│   ├── views.py         # generate, verify_ats, google_login, google_callback views
 │   ├── utils.py         # Bridge between Django and services/
+│   ├── jobs.py          # Background tasks and async processes
 │   ├── urls.py
 │   ├── apps.py
 │   └── templates/
@@ -57,12 +64,22 @@ resume-gen/
 
 ## Running Tests
 
-The application uses standard `unittest` to validate LLM schemas, JSON payloads, and mock PDF/DOCX streams without needing physical mock files or live API keys.
+The application uses **pytest** to validate LLM schemas, JSON payloads, and mock PDF/DOCX streams without needing physical mock files or live API keys.
 
-To run the entire test suite:
+To run the full test suite (ensure your virtual environment is active first):
 
 ```bash
-python -m unittest discover tests
+# If activated:
+pytest
+
+# Or run directly via the venv:
+./venv/bin/pytest
+```
+
+To run with verbose output:
+
+```bash
+pytest -v
 ```
 
 ## Prerequisites
@@ -111,7 +128,6 @@ export GEMINI_API_KEY="your-api-key-here"
    - **`api_key`** — your Google Cloud API key (used to load the Picker API in the browser)
 
    To get these, go to [Google Cloud Console](https://console.cloud.google.com/) and enable the **Google Drive API** and **Google Picker API** on your project. Then:
-
    - Under **APIs & Services → Credentials**, create a **Web Application** OAuth 2.0 client. Add `http://127.0.0.1:8000` as an authorized JavaScript origin and `http://127.0.0.1:8000/google-callback/` as an authorized redirect URI. Download the JSON and save it as `client_secret.json`.
    - Also create an **API key** and add `api_key` as a field inside the `web` object in `client_secret.json`:
 
@@ -148,7 +164,7 @@ python main.py
 
 ```text
 usage: main.py [-h] [--format {pdf,docx,both,gdocs}] [--output OUTPUT] [--dir DIR]
-               [--revise] [--cl] [--input INPUT] [--gdoc-id GDOC_ID]
+               [--revise] [--cl] [--verify] [--input INPUT] [--gdoc-id GDOC_ID]
                [--gdoc-update] [--notes NOTES] [--dry-run]
 
 options:
@@ -160,6 +176,7 @@ options:
   --dir DIR                     Target output directory. (default: ./resumes)
   --revise                      Prompt for revision notes after initial generation.
   --cl                          Generate a tailored cover letter after resume creation.
+  --verify                      Run the ATS verification checker on the finalized resume.
   --input INPUT                 Existing .docx resume to revise instead of starting from scratch.
   --gdoc-id GDOC_ID             Existing Google Doc ID to revise instead of a local file.
   --gdoc-update                 Update the target Google Doc in-place when used with --gdoc-id.
@@ -170,27 +187,33 @@ options:
 ### CLI Workflows
 
 **Generate a resume and cover letter:**
+
 ```bash
 python main.py --cl
 ```
 
 Expected output files:
+
 - [examples/John_Doe_Resume.docx](examples/John_Doe_Resume.docx)
 - [examples/John_Doe_Resume.pdf](examples/John_Doe_Resume.pdf)
 
 **Revise an existing resume:**
+
 ```bash
 python main.py --input old_resume.docx --notes "Focus on Python and AI engineering. Tighten early career bullets." --output 'John Doe Updated Resume 2026'
 ```
+
 Example using 'John_Doe_Resume.docx' as input:
 [examples/John_Doe_Revised_Example.docx](examples/John_Doe_Revised_Example.docx)
 
 **Revise a newly generated resume:**
+
 ```bash
 python main.py --revise --notes "Add 1-2 enhancements to my skills and work experience sections, make me sound more experienced."
 ```
 
 **Revise an existing Google Doc and update it in-place:**
+
 ```bash
 python main.py --gdoc-id YOUR_DOC_ID --gdoc-update --notes "Tailor for a senior engineering role."
 ```
@@ -203,22 +226,49 @@ https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms/
                                    This is your Doc ID
 ```
 
+**Run ATS verification after generating:**
+
+```bash
+python main.py --verify
+```
+
+After the resume is generated, you will be prompted to optionally enter a **Target Role** and paste a **Job Description**. The checker will then:
+
+- Score the resume out of **100**
+- Report the **keyword match rate** against the job description
+- List **missing keywords** that should be incorporated
+- Provide **formatting feedback** (e.g. use of action verbs, quantified metrics)
+- Provide **content feedback** (e.g. cliches, vague language, missing sections)
+- Give an **overall recommendation**
+
+Both fields are optional — leaving them blank runs a general ATS best-practices scan without job-specific keyword matching.
+
+**Generate, verify ATS, and write a cover letter in one pass:**
+
+```bash
+python main.py --cl --verify
+```
+
 **Preview output without saving:**
+
 ```bash
 python main.py --dry-run
 ```
 
 **Save files to a custom directory:**
+
 ```bash
-python main.py --dir ~/Documents/Resumes --format pdf
+python main.py --dir revised-files --format pdf
 ```
 
 **Generate and upload directly to Google Drive:**
+
 ```bash
 python main.py --format gdocs
 ```
+
 This runs the full interactive flow, then uploads the result to your Google Drive as a Google Doc. On first run, a browser window opens for OAuth authorization. Once authorized, the Doc URL is printed to the console — open it in Google Docs to view, edit, or share.
-Example Google Docs export:
+Example Google Docs export (with the cover letter option selected):
 
 ![Google Docs export example](examples/google-docs-export.png)
 
@@ -246,9 +296,39 @@ python manage.py runserver
    - **Build from Scratch** — Fill in your profile, work experience, education, and skills manually.
    - **Revise Existing Resume** — Upload a `.docx` file or click **Select from Google Drive** to pick a Google Doc directly from your Drive. Enter revision notes and click **Generate Resume**.
 
+5. Use the **Targeting & ATS** sidebar card to optionally provide:
+   - **Target Role** — used by the cover letter generator and the ATS checker.
+   - **Target Company** — used by the cover letter generator.
+   - **Job Description** — paste the full job posting for precise keyword-gap analysis during ATS verification.
+
+6. Click **Check ATS Score** at any time to run ATS verification without downloading the resume. Results are displayed inline below the form with a color-coded score, missing keywords, and actionable feedback.
+
 > **Note:** Always use `http://127.0.0.1:8000` (not `localhost`) during local development to match your OAuth authorized origins exactly.
 
 > The `GEMINI_API_KEY` environment variable must be set before starting the server.
+
+---
+
+## ATS Verification
+
+The ATS checker is powered by a dedicated Gemini prompt that acts as both an ATS algorithm and a senior technical recruiter. It evaluates:
+
+| Check                  | Description                                                      |
+| ---------------------- | ---------------------------------------------------------------- |
+| **Keyword Alignment**  | Matches resume terms against the target job description          |
+| **Action Verbs**       | Flags weak or passive language                                   |
+| **Quantified Impact**  | Checks for measurable metrics (%, $, numbers)                    |
+| **Formatting Clarity** | Ensures dates, titles, and sections are parseable by ATS parsers |
+| **Cliché Detection**   | Flags vague filler phrases that reduce relevance scoring         |
+
+The checker returns:
+
+- `ats_score` — integer score out of 100
+- `keyword_match_rate` — percentage or qualitative description
+- `missing_keywords` — list of terms present in the JD but absent from the resume
+- `formatting_feedback` — list of structural issues
+- `content_feedback` — list of content-level improvements
+- `overall_recommendation` — a summary with suggested next steps
 
 ---
 
@@ -264,7 +344,6 @@ resumes/
 ├── John_Doe_Cover_Letter.docx
 ```
 
-
 ## Architecture
 
 Process flow visualization:
@@ -276,3 +355,4 @@ Process flow visualization:
 - Programmatically formats outputs locally via `python-docx` for MS Word compatibility and `fpdf2` for PDF generation.
 - Google Drive integration uses `google-api-python-client` with OAuth 2.0 PKCE flow to upload `.docx` files and convert them to native Google Docs format.
 - Web UI Google Drive file selection uses the **Google Picker API** with **Google Identity Services (GIS)** token-based auth, compatible with Chrome's Privacy Sandbox and FedCM restrictions (2026 standards).
+- ATS verification uses a separate `ATS_VERIFICATION_SYSTEM_PROMPT` and `AtsVerificationSchema` to run an independent Gemini call after resume generation, keeping the scoring logic cleanly isolated from the resume generation logic.

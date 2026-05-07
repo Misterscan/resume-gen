@@ -1,109 +1,131 @@
 import os
 import io
-import sys
-import tempfile
 import zipfile
-from pathlib import Path
-import logging
+from typing import Any, Dict, Optional
 
-try:
-    from services import (
-        generate_resume_content,
-        revise_resume_content,
+from services.document import (
         extract_docx_text,
-        generate_cover_letter_content,
         generate_docx_stream,
         generate_cover_letter_docx_stream,
         generate_pdf_stream,
         generate_cover_letter_pdf_stream,
     )
-except ImportError as e:
-    logging.getLogger(__name__).error(f"Failed to import services logic: {str(e)}")
+from services.workflow import ResumeWorkflow, ResumeWorkflowInput, ResumeWorkflowResult
+from services.filenames import sanitize_filename
+
+
+def require_api_key() -> str:
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+    return api_key
+
+
+def run_resume_workflow(raw_data: dict, options: dict) -> ResumeWorkflowResult:
+    workflow = ResumeWorkflow()
+    payload = ResumeWorkflowInput(
+        raw_data=options.get("cached_raw_data") or raw_data,
+        api_key=require_api_key(),
+        revision_notes=options.get("revision_notes", ""),
+        resume_text=options.get("gdrive_text", ""),
+        target_role=options.get("target_role", ""),
+        target_company=options.get("target_company", ""),
+        job_description=options.get("job_description", ""),
+    )
+
+    if options.get("cached_resume"):
+        result = ResumeWorkflowResult(
+            raw_data=payload.raw_data,
+            resume=options["cached_resume"],
+            cover_letter=options.get("cached_cover_letter"),
+        )
+    elif options.get("mode") == "revise":
+        if options.get("uploaded_file") and not payload.resume_text:
+            from services.document import extract_docx_text
+            payload = ResumeWorkflowInput(
+                **{**payload.__dict__, "resume_text": extract_docx_text(options["uploaded_file"])}
+            )
+        result = workflow.revise(payload)
+    else:
+        result = workflow.generate(payload)
+
+    if options.get("generate_cl") and not result.cover_letter:
+        result = workflow.add_cover_letter(result, payload)
+
+    return result
+
+
+def safe_basename(candidate_data: Dict[str, Any]) -> str:
+    full_name = str(candidate_data.get("full_name") or "My Resume")
+    return sanitize_filename(full_name).removesuffix(".docx").removesuffix(".pdf")
+
+
+def render_output(result: ResumeWorkflowResult, output_format: str):
+    base_name = safe_basename(result.raw_data)
+    generated_files: list[tuple[io.BytesIO, str]] = []
+
+    if output_format in {"docx", "both"}:
+        generated_files.append(
+            (
+                generate_docx_stream(result.resume, result.raw_data),
+                f"{base_name}.docx",
+            )
+        )
+
+        if result.cover_letter:
+            generated_files.append(
+                (
+                    generate_cover_letter_docx_stream(
+                        result.cover_letter,
+                        result.raw_data,
+                    ),
+                    f"{base_name} Cover Letter.docx",
+                )
+            )
+
+    if output_format in {"pdf", "both"}:
+        generated_files.append(
+            (
+                generate_pdf_stream(result.resume, result.raw_data),
+                f"{base_name}.pdf",
+            )
+        )
+
+        if result.cover_letter:
+            generated_files.append(
+                (
+                    generate_cover_letter_pdf_stream(
+                        result.cover_letter,
+                        result.raw_data,
+                    ),
+                    f"{base_name} Cover Letter.pdf",
+                )
+            )
+
+    if not generated_files:
+        raise RuntimeError("No output files were generated.")
+
+    if len(generated_files) == 1:
+        stream, filename = generated_files[0]
+        return stream, filename, result.resume, result.cover_letter, result.raw_data
+
+    zip_stream = io.BytesIO()
+
+    with zipfile.ZipFile(zip_stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for stream, filename in generated_files:
+            archive.writestr(filename, stream.getvalue())
+
+    zip_stream.seek(0)
+
+    return (
+        zip_stream,
+        f"{base_name}.zip",
+        result.resume,
+        result.cover_letter,
+        result.raw_data,
+    )
+
 
 def build_resume_from_payload(raw_data: dict, options: dict):
-    """
-    Acts as a bridge between the Django web form and the existing `main.py`
-    core logic by manually gathering the API context and executing the script
-    silently without STDIN prompts, saving output to a temporary system dir.
-    """
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is not set. Please set it in your environment.")
-        
-    uploaded_file = options.get("uploaded_file")
-    revision_notes = options.get("revision_notes", "")
-    
-    resume = options.get("cached_resume")
-    cover_letter = options.get("cached_cover_letter")
-    if options.get("cached_raw_data"):
-        raw_data = options["cached_raw_data"]
-
-    if not resume:
-        if options.get("mode") == "revise":
-            if uploaded_file or options.get("gdrive_text"):
-                # Revise existing docx or gdoc
-                resume_text = options.get("gdrive_text")
-                if not resume_text:
-                    resume_text = extract_docx_text(uploaded_file)
-                revised = revise_resume_content(
-                    api_key=api_key,
-                    revision_notes=revision_notes,
-                    resume_text=resume_text,
-                )
-                raw_data = revised["candidate"]
-                resume = revised["resume"]
-                raw_data["source_resume_text"] = resume_text
-            else:
-                # Revise from manual web form fields
-                revised = revise_resume_content(
-                    api_key=api_key,
-                    revision_notes=revision_notes,
-                    raw_data=raw_data,
-                )
-                raw_data = revised["candidate"]
-                resume = revised["resume"]
-        else:
-            # Generate structured JSON resume content from raw data
-            resume = generate_resume_content(raw_data, api_key)
-            
-        # Check if we generate Cover Letter
-        if options.get("generate_cl"):
-            cover_letter = generate_cover_letter_content(
-                raw_data=raw_data,
-                resume=resume,
-                revision_notes=revision_notes,
-                target_role=options.get("target_role", ""),
-                target_company=options.get("target_company", ""),
-                api_key=api_key,
-            )
-    
-    base_name = raw_data.get("full_name", "My Resume").replace("/", "_").replace(" ", "_")
-    output_format = options.get("format", "pdf")
-    
-    generated_files = []
-    
-    if output_format in ('docx', 'both'):
-        stream = generate_docx_stream(resume, raw_data)
-        generated_files.append((stream, f"{base_name}.docx"))
-        
-        if cover_letter:
-            cl_stream = generate_cover_letter_docx_stream(cover_letter, raw_data)
-            generated_files.append((cl_stream, f"{base_name} Cover Letter.docx"))
-            
-    if output_format in ('pdf', 'both'):
-        stream = generate_pdf_stream(resume, raw_data)
-        generated_files.append((stream, f"{base_name}.pdf"))
-        
-        if cover_letter:
-            cl_stream = generate_cover_letter_pdf_stream(cover_letter, raw_data)
-            generated_files.append((cl_stream, f"{base_name} Cover Letter.pdf"))
-            
-    if len(generated_files) == 1:
-        return generated_files[0][0], generated_files[0][1], resume, cover_letter, raw_data
-        
-    zip_stream = io.BytesIO()
-    with zipfile.ZipFile(zip_stream, 'w') as zf:
-        for stream, name in generated_files:
-            zf.writestr(name, stream.getvalue())
-    zip_stream.seek(0)
-    return zip_stream, f"{base_name}.zip", resume, cover_letter, raw_data
+    result = run_resume_workflow(raw_data, options)
+    return render_output(result, options.get("format", "pdf"))

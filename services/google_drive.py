@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+from typing import Any
 import io
 import logging
 from typing import Any, Optional
@@ -10,31 +12,55 @@ try:
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-except ImportError:
-    pass
+except ImportError as exc:
+    GOOGLE_IMPORT_ERROR = exc
+else:
+    GOOGLE_IMPORT_ERROR = None
+
+
+def require_google_dependencies() -> None:
+    if GOOGLE_IMPORT_ERROR is not None:
+        raise ConfigurationError(
+            "Google Drive dependencies are not installed. "
+            "Install google-api-python-client, google-auth, and google-auth-oauthlib."
+        ) from GOOGLE_IMPORT_ERROR
 
 logger = logging.getLogger(__name__)
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
+def _token_path() -> Path:
+    root = Path(os.getenv("RESUME_GEN_CONFIG_DIR", "~/.config/resume-gen")).expanduser()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return root / "google-token.json"
+
+
+def _client_secret_path() -> Path:
+    path = Path(os.getenv("GOOGLE_CLIENT_SECRET_FILE", "client_secret.json")).expanduser()
+    if not path.exists():
+        raise ConfigurationError("Google OAuth client secret file was not found.")
+    return path
+
+
 def get_google_credentials() -> Any:
+    require_google_dependencies()
+    token_path = _token_path()
     creds = None
-    token_path = 'token.json'
-    if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # Inside get_google_credentials
-            # Allow loading from ENV for containerized deployments
-            if not os.path.exists('client_secret.json') and 'GOOGLE_CLIENT_SECRET_JSON' in os.environ:
-            # Use json.loads(os.environ['GOOGLE_CLIENT_SECRET_JSON']) 
-            # and use Credentials.from_authorized_user_info
-                raise ConfigurationError("client_secret.json not found for Google Docs integration.")
-            flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(token_path, 'w') as token:
-            token.write(creds.to_json())
+
+    if token_path.exists():
+        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+
+    if creds and creds.valid:
+        return creds
+
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+    else:
+        flow = InstalledAppFlow.from_client_secrets_file(str(_client_secret_path()), SCOPES)
+        creds = flow.run_local_server(port=0)
+
+    token_path.write_text(creds.to_json(), encoding="utf-8")
+    os.chmod(token_path, 0o600)
+
     return creds
 
 def get_gdoc_text(file_id: str, creds: Any) -> str:

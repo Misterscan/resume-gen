@@ -5,29 +5,94 @@ from docx import Document as create_document
 from docx.document import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.shared import Pt
-from docx.styles.style import ParagraphStyle
 from fpdf import FPDF
 
 from .exceptions import DocumentError
 
 logger = logging.getLogger(__name__)
 
+MAX_EXTRACTED_DOCX_CHARS = 80_000
+
+def _iter_table_text(table):
+    for row in table.rows:
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                value = paragraph.text.strip()
+                if value:
+                    yield value
+
+
 def extract_docx_text(input_file: Any) -> str:
-    """Takes a file path or a file-like object and extracts text."""
     try:
         document = create_document(input_file)
-        paragraphs = [
-            paragraph.text.strip()
-            for paragraph in document.paragraphs
-            if paragraph.text.strip()
-        ]
-        text = "\n".join(paragraphs).strip()
+        parts: list[str] = []
+
+        for section in document.sections:
+            for paragraph in section.header.paragraphs:
+                value = paragraph.text.strip()
+                if value:
+                    parts.append(value)
+
+        for paragraph in document.paragraphs:
+            value = paragraph.text.strip()
+            if value:
+                parts.append(value)
+
+        for table in document.tables:
+            parts.extend(_iter_table_text(table))
+
+        for section in document.sections:
+            for paragraph in section.footer.paragraphs:
+                value = paragraph.text.strip()
+                if value:
+                    parts.append(value)
+
+        text = "\n".join(parts).strip()
+
         if not text:
             raise DocumentError("The DOCX file did not contain readable text.")
+
+        if len(text) > MAX_EXTRACTED_DOCX_CHARS:
+            raise DocumentError(
+                f"The DOCX text is too large: {len(text)} characters."
+            )
+
         return text
+
+    except DocumentError:
+        raise
     except Exception as exc:
-        logger.error(f"Failed to read DOCX file: {exc}")
-        raise DocumentError(f"Failed to read DOCX: {exc}")
+        logger.info("DOCX extraction failed: %s", exc.__class__.__name__)
+        raise DocumentError("Failed to read DOCX content.") from exc
+
+def candidate_name(raw_data: Dict[str, Any]) -> str:
+    value = str(raw_data.get("full_name") or "").strip()
+    return value or "Candidate"
+
+
+def candidate_contact(raw_data: Dict[str, Any]) -> str:
+    return str(raw_data.get("contact_info") or "").strip()
+
+
+def format_role_line(item: Dict[str, Any]) -> str:
+    parts = [
+        item.get("title", ""),
+        item.get("company", ""),
+        item.get("location", ""),
+        item.get("dates", ""),
+    ]
+    return " | ".join(str(part).strip() for part in parts if str(part).strip())
+
+
+def format_education_line(item: Dict[str, Any]) -> str:
+    parts = [
+        item.get("degree", ""),
+        item.get("institution", ""),
+        item.get("location", ""),
+        item.get("dates", ""),
+    ]
+    return " | ".join(str(part).strip() for part in parts if str(part).strip())
+
 
 def add_heading(document: Document, text: str) -> None:
     paragraph = document.add_paragraph()
@@ -49,11 +114,11 @@ def generate_docx_stream(resume: Dict[str, Any], raw_data: Dict[str, Any]) -> io
         configure_docx(document)
 
         name = document.add_paragraph()
-        name_run = name.add_run(raw_data["full_name"])
+        name_run = name.add_run(candidate_name(raw_data))
         name_run.bold = True
         name_run.font.size = Pt(16)
 
-        document.add_paragraph(raw_data["contact_info"])
+        document.add_paragraph(candidate_contact(raw_data))
 
         add_heading(document, "Professional Summary")
         document.add_paragraph(resume.get("professional_summary", ""))
@@ -61,12 +126,7 @@ def generate_docx_stream(resume: Dict[str, Any], raw_data: Dict[str, Any]) -> io
         add_heading(document, "Work Experience")
         for item in resume.get("work_experience", []):
             role = document.add_paragraph()
-            role_run = role.add_run(
-                f"{item.get('title', '')} | "
-                f"{item.get('company', '')} | "
-                f"{item.get('location', '')} | "
-                f"{item.get('dates', '')}"
-            )
+            role_run = role.add_run(format_role_line(item))
             role_run.bold = True
             for bullet in item.get("bullets", []):
                 document.add_paragraph(bullet, style="List Bullet")
@@ -74,12 +134,7 @@ def generate_docx_stream(resume: Dict[str, Any], raw_data: Dict[str, Any]) -> io
         add_heading(document, "Education")
         for item in resume.get("education", []):
             edu = document.add_paragraph()
-            edu_run = edu.add_run(
-                f"{item.get('degree', '')} | "
-                f"{item.get('institution', '')} | "
-                f"{item.get('location', '')} | "
-                f"{item.get('dates', '')}"
-            )
+            edu_run = edu.add_run(format_education_line(item))
             edu_run.bold = True
             details = item.get("details", "")
             if isinstance(details, list):
@@ -104,12 +159,12 @@ def generate_cover_letter_docx_stream(cover_letter: Dict[str, Any], raw_data: Di
         configure_docx(document)
 
         name = document.add_paragraph()
-        name_run = name.add_run(raw_data["full_name"])
+        name_run = name.add_run(candidate_name(raw_data))
         name_run.bold = True
         name_run.font.size = Pt(16)
 
-        document.add_paragraph(raw_data["contact_info"])
-        document.add_paragraph("")  # spacing
+        document.add_paragraph(candidate_contact(raw_data))
+        document.add_paragraph("")
 
         import datetime
         document.add_paragraph(datetime.date.today().strftime("%B %d, %Y"))
@@ -244,12 +299,14 @@ def write_pdf_header(pdf: ResumePDF, raw_data: Dict[str, Any]) -> None:
     pdf.cell(
         pdf.usable_width(),
         PDFConfig.LINE_HEIGHT_TITLE,
-        pdf.clean_text(raw_data["full_name"]),
+        pdf.clean_text(candidate_name(raw_data)),
         new_x="LMARGIN",
         new_y="NEXT",
     )
     pdf.set_font(PDFConfig.FONT_FAMILY, "", PDFConfig.FONT_SIZE_BODY)
-    pdf.paragraph(raw_data.get("contact_info", ""))
+    contact = candidate_contact(raw_data)
+    if contact:
+        pdf.paragraph(contact)
 
 def _finalize_pdf_stream(pdf: FPDF) -> io.BytesIO:
     stream = io.BytesIO()

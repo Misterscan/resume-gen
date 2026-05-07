@@ -1,102 +1,153 @@
-import unittest
+import pytest
 from unittest.mock import patch, MagicMock
-from services.llm import generate_resume_content, revise_resume_content, generate_cover_letter_content
+from services.llm import (
+    generate_resume_content,
+    revise_resume_content,
+    generate_cover_letter_content,
+    verify_ats_compatibility,
+)
 from services.exceptions import IntegrationError, ValidationError
 
-class TestLLMService(unittest.TestCase):
-    
-    @patch('services.llm.genai.Client')
-    def test_generate_resume_content_success(self, mock_genai_client):
-        # Setup mock return from Gemini
-        mock_response = MagicMock()
-        mock_response.text = '''
-        {
-            "professional_summary": "Test Summary",
-            "work_experience": [],
-            "education": [],
-            "skills": ["Python"]
-        }
-        '''
-        mock_client_instance = mock_genai_client.return_value
-        mock_client_instance.models.generate_content.return_value = mock_response
 
-        raw_data = {"full_name": "John Doe", "contact_info": "john@example.com"}
-        result = generate_resume_content(raw_data=raw_data, api_key="dummy_key")
+VALID_RESUME_JSON = """
+{
+    "professional_summary": "Test Summary",
+    "work_experience": [],
+    "education": [],
+    "skills": ["Python"]
+}
+"""
 
-        self.assertEqual(result["professional_summary"], "Test Summary")
-        self.assertIn("Python", result["skills"])
-        mock_client_instance.models.generate_content.assert_called_once()
+VALID_REVISION_JSON = """
+{
+    "candidate": {
+        "full_name": "Test User",
+        "contact_info": "new@example.com"
+    },
+    "resume": {
+        "professional_summary": "Revised Summary",
+        "work_experience": [],
+        "education": [],
+        "skills": ["Python", "Django"]
+    }
+}
+"""
 
-    @patch('services.llm.genai.Client')
-    def test_generate_resume_schema_validation_failure(self, mock_genai_client):
-        # Setup mock return missing required schema fields
-        mock_response = MagicMock()
-        mock_response.text = '{"bad_json_structure"}' # purposefully bad to trigger JSON failure or validation
-        mock_client_instance = mock_genai_client.return_value
-        mock_client_instance.models.generate_content.return_value = mock_response
+VALID_COVER_LETTER_JSON = """
+{
+    "recipient_info": "Hiring Team",
+    "greeting": "Hello,",
+    "introduction": "Intro",
+    "body_paragraphs": ["Body 1"],
+    "company_connection": "Connection",
+    "closing": "Closing",
+    "sign_off": "Best"
+}
+"""
 
-        raw_data = {"full_name": "John Doe"}
-        
-        with self.assertRaises((ValidationError, IntegrationError)):
-            generate_resume_content(raw_data=raw_data, api_key="dummy_key")
+VALID_ATS_JSON = """
+{
+    "ats_score": 82,
+    "keyword_match_rate": "75%",
+    "missing_keywords": ["Kubernetes", "CI/CD"],
+    "formatting_feedback": ["Use more quantified metrics."],
+    "content_feedback": ["Avoid the phrase 'results-driven'."],
+    "overall_recommendation": "Strong resume. Add missing keywords for a better match."
+}
+"""
 
-    @patch('services.llm.genai.Client')
-    def test_revise_resume_content_success(self, mock_genai_client):
-        mock_response = MagicMock()
-        mock_response.text = '''
-        {
-            "candidate": {
-                "full_name": "Test User",
-                "contact_info": "new@example.com"
-            },
-            "resume": {
-                "professional_summary": "Revised Summary",
-                "work_experience": [],
-                "education": [],
-                "skills": ["Python", "Django"]
-            }
-        }
-        '''
-        mock_client_instance = mock_genai_client.return_value
-        mock_client_instance.models.generate_content.return_value = mock_response
 
-        result = revise_resume_content(
-            api_key="dummy_key",
-            revision_notes="Add Django to skills",
-            current_resume={"professional_summary": "Old Summary"}
-        )
+def _make_mock_client(response_text):
+    mock_response = MagicMock()
+    mock_response.text = response_text
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+    return mock_client
 
-        self.assertEqual(result["resume"]["professional_summary"], "Revised Summary")
-        self.assertIn("Django", result["resume"]["skills"])
 
-    @patch('services.llm.genai.Client')
-    def test_generate_cover_letter_content(self, mock_genai_client):
-        mock_response = MagicMock()
-        mock_response.text = '''
-        {
-            "recipient_info": "Hiring Team",
-            "greeting": "Hello,",
-            "introduction": "Intro",
-            "body_paragraphs": ["Body 1"],
-            "company_connection": "Connection",
-            "closing": "Closing",
-            "sign_off": "Best"
-        }
-        '''
-        mock_client_instance = mock_genai_client.return_value
-        mock_client_instance.models.generate_content.return_value = mock_response
+@patch("services.llm.genai.Client")
+def test_generate_resume_content_success(mock_genai_client):
+    mock_genai_client.return_value = _make_mock_client(VALID_RESUME_JSON)
 
-        result = generate_cover_letter_content(
-            raw_data={},
-            resume={},
-            revision_notes="",
-            target_role="Developer",
-            target_company="Acme Corp",
-            api_key="dummy_key"
-        )
-        
-        self.assertEqual(result["recipient_info"], "Hiring Team")
-        self.assertEqual(result["introduction"], "Intro")
+    result = generate_resume_content(
+        raw_data={"full_name": "John Doe", "contact_info": "john@example.com"},
+        api_key="dummy_key",
+    )
 
-if __name__ == '__main__':
-    unittest.main()
+    assert result["professional_summary"] == "Test Summary"
+    assert "Python" in result["skills"]
+    mock_genai_client.return_value.models.generate_content.assert_called_once()
+
+
+@patch("services.llm.genai.Client")
+def test_generate_resume_schema_validation_failure(mock_genai_client):
+    mock_genai_client.return_value = _make_mock_client('{"bad_json_structure"}')
+
+    with pytest.raises((ValidationError, IntegrationError)):
+        generate_resume_content(raw_data={"full_name": "John Doe"}, api_key="dummy_key")
+
+
+@patch("services.llm.genai.Client")
+def test_revise_resume_content_success(mock_genai_client):
+    mock_genai_client.return_value = _make_mock_client(VALID_REVISION_JSON)
+
+    result = revise_resume_content(
+        api_key="dummy_key",
+        revision_notes="Add Django to skills",
+        current_resume={"professional_summary": "Old Summary"},
+    )
+
+    assert result["resume"]["professional_summary"] == "Revised Summary"
+    assert "Django" in result["resume"]["skills"]
+
+
+@patch("services.llm.genai.Client")
+def test_generate_cover_letter_content(mock_genai_client):
+    mock_genai_client.return_value = _make_mock_client(VALID_COVER_LETTER_JSON)
+
+    result = generate_cover_letter_content(
+        raw_data={},
+        resume={},
+        revision_notes="",
+        target_role="Developer",
+        target_company="Acme Corp",
+        api_key="dummy_key",
+    )
+
+    assert result["recipient_info"] == "Hiring Team"
+    assert result["introduction"] == "Intro"
+
+
+@patch("services.llm.genai.Client")
+def test_verify_ats_compatibility_success(mock_genai_client):
+    mock_genai_client.return_value = _make_mock_client(VALID_ATS_JSON)
+
+    result = verify_ats_compatibility(
+        resume={"professional_summary": "Test Summary", "skills": ["Python"]},
+        target_role="DevOps Engineer",
+        job_description="Looking for Kubernetes and CI/CD experience.",
+        api_key="dummy_key",
+    )
+
+    assert result["ats_score"] == 82
+    assert result["keyword_match_rate"] == "75%"
+    assert "Kubernetes" in result["missing_keywords"]
+    assert isinstance(result["formatting_feedback"], list)
+    assert isinstance(result["content_feedback"], list)
+    assert result["overall_recommendation"] != ""
+
+
+@patch("services.llm.genai.Client")
+def test_verify_ats_compatibility_general_scan(mock_genai_client):
+    """ATS check with no target role or job description (general scan)."""
+    mock_genai_client.return_value = _make_mock_client(VALID_ATS_JSON)
+
+    result = verify_ats_compatibility(
+        resume={"professional_summary": "Test", "skills": []},
+        target_role="",
+        job_description="",
+        api_key="dummy_key",
+    )
+
+    assert isinstance(result["ats_score"], int)
+    assert 0 <= result["ats_score"] <= 100

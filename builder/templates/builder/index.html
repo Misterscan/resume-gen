@@ -556,6 +556,23 @@
                 </div>
 
                 <div class="sidebar-card">
+                    <h2>Targeting & ATS</h2>
+                    <p class="section-subtitle">Provide details for the Cover Letter and ATS Checker.</p>
+                    <div class="form-group">
+                        <label for="target_role">Target Role</label>
+                        <input type="text" name="target_role" id="target_role" placeholder="Senior Software Engineer">
+                    </div>
+                    <div class="form-group">
+                        <label for="target_company">Target Company</label>
+                        <input type="text" name="target_company" id="target_company" placeholder="Google">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label for="job_description">Job Description (For ATS Check)</label>
+                        <textarea id="job_description" name="job_description" rows="3" placeholder="Paste the job description here..."></textarea>
+                    </div>
+                </div>
+
+                <div class="sidebar-card">
                     <h2>Generation Options</h2>
                     <p class="section-subtitle">Choose how the final resume package should be produced.</p>
                     <div class="form-group">
@@ -569,20 +586,9 @@
                     </div>
 
                     <label class="inline-check" style="text-transform: none; letter-spacing: 0; font-size: 0.95rem; font-weight: 500; margin-bottom: 0;">
-                        <input type="checkbox" name="generate_cl" id="generate_cl" onchange="document.getElementById('cl_fields').style.display = this.checked ? 'grid' : 'none';">
+                        <input type="checkbox" name="generate_cl" id="generate_cl">
                         <span>Generate cover letter</span>
                     </label>
-
-                    <div id="cl_fields" class="grid-2 mt-md" style="display: none; padding-top: 1rem; border-top: 1px dashed var(--border-color);">
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label for="target_role">Target Role</label>
-                            <input type="text" name="target_role" id="target_role" placeholder="Senior Software Engineer">
-                        </div>
-                        <div class="form-group" style="margin-bottom: 0;">
-                            <label for="target_company">Target Company</label>
-                            <input type="text" name="target_company" id="target_company" placeholder="Google">
-                        </div>
-                    </div>
                 </div>
 
             </aside>
@@ -593,7 +599,15 @@
                 <h3>Ready to Generate</h3>
                 <p>Export a polished resume package in the format you need.</p>
             </div>
-            <button type="submit" id="submit-btn" class="btn" style="padding: 1rem 2rem; font-size: 1rem; min-width: 280px;">Build & Generate Documents</button>
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end;">
+                <button type="button" id="verify-ats-btn" class="btn btn-outline" style="padding: 1rem 1.5rem; font-size: 1rem;">Check ATS Score</button>
+                <button type="submit" id="submit-btn" class="btn" style="padding: 1rem 1.5rem; font-size: 1rem;">Build & Generate Documents</button>
+            </div>
+        </div>
+        
+        <div id="ats-results-container" class="section-block mt-md hidden-panel" style="margin-bottom: 2rem;">
+            <h2>ATS Verification Results</h2>
+            <div id="ats-results-content">Loading...</div>
         </div>
     </form>
 </div>
@@ -771,6 +785,95 @@
             alert("Google Picker failed to load.");
         }
     }
+
+    // ATS Verification Logic
+    document.getElementById('verify-ats-btn').addEventListener('click', async function(e) {
+        e.preventDefault();
+        const form = document.getElementById('resume-form');
+        const formData = new FormData(form);
+        const resultsContainer = document.getElementById('ats-results-container');
+        const resultsContent = document.getElementById('ats-results-content');
+        
+        resultsContainer.classList.remove('hidden-panel');
+        resultsContent.innerHTML = '<p>Analyzing resume against ATS guidelines and target role... This may take a minute.</p>';
+        resultsContainer.scrollIntoView({ behavior: 'smooth' });
+        
+        try {
+            const response = await fetch("{% url 'verify_ats' %}", {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await response.json();
+            
+            if (data.error) {
+                resultsContent.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                return;
+            }
+            
+            if (!data.job_id) {
+                 resultsContent.innerHTML = `<p style="color: red;">Error: Failed to initiate background job.</p>`;
+                 return;
+            }
+
+            const pollInterval = setInterval(async () => {
+                try {
+                    const statusRes = await fetch(`/job-status/${data.job_id}/`);
+                    const statusData = await statusRes.json();
+                    
+                    if (statusData.error) {
+                        clearInterval(pollInterval);
+                        resultsContent.innerHTML = `<p style="color: red;">Error: ${statusData.error}</p>`;
+                        return;
+                    }
+                    
+                    if (statusData.status === 'failed') {
+                        clearInterval(pollInterval);
+                        resultsContent.innerHTML = `<p style="color: red;">Error: ATS check failed. ${statusData.error || ''}</p>`;
+                        return;
+                    }
+                    
+                    if (statusData.status === 'complete') {
+                        clearInterval(pollInterval);
+                        const result = statusData.result;
+                        
+                        let html = `
+                            <div style="display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1rem;">
+                                <h3 style="font-size: 2.5rem; margin: 0; color: ${result.ats_score > 75 ? 'green' : (result.ats_score > 50 ? 'orange' : 'red')}">${result.ats_score}/100</h3>
+                                <strong>Match Rate:</strong> ${result.keyword_match_rate}
+                            </div>
+                            <div style="margin-bottom: 1rem;"><strong>Overall Recommendation:</strong> ${result.overall_recommendation}</div>
+                        `;
+                        
+                        if (result.missing_keywords && result.missing_keywords.length > 0) {
+                            html += `<h4>Missing Keywords</h4><ul style="margin-bottom: 1rem;">`;
+                            result.missing_keywords.forEach(kw => html += `<li>${kw}</li>`);
+                            html += `</ul>`;
+                        }
+                        
+                        if (result.formatting_feedback && result.formatting_feedback.length > 0) {
+                            html += `<h4>Formatting Feedback</h4><ul style="margin-bottom: 1rem;">`;
+                            result.formatting_feedback.forEach(fb => html += `<li>${fb}</li>`);
+                            html += `</ul>`;
+                        }
+                        
+                        if (result.content_feedback && result.content_feedback.length > 0) {
+                            html += `<h4>Content Feedback</h4><ul style="margin-bottom: 1rem;">`;
+                            result.content_feedback.forEach(fb => html += `<li>${fb}</li>`);
+                            html += `</ul>`;
+                        }
+                        
+                        resultsContent.innerHTML = html;
+                    }
+                } catch (pollErr) {
+                    clearInterval(pollInterval);
+                    resultsContent.innerHTML = `<p style="color: red;">Failed to poll ATS score. ${pollErr.message}</p>`;
+                }
+            }, 1000);
+            
+        } catch (err) {
+            resultsContent.innerHTML = `<p style="color: red;">Failed to initiate ATS score check. ${err.message}</p>`;
+        }
+    });
 
 </script>
 <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
