@@ -7,9 +7,7 @@ from typing import Any, Dict, Optional
 import pydantic
 from google import genai
 from google.genai import types
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-
-from .exceptions import IntegrationError
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from prompts import (
     RESUME_SYSTEM_PROMPT,
@@ -18,11 +16,25 @@ from prompts import (
     ATS_VERIFICATION_SYSTEM_PROMPT,
 )
 from .schemas import ResumeSchema, RevisionResponseSchema, CoverLetterSchema, AtsVerificationSchema
-from .exceptions import IntegrationError, ValidationError
+from .exceptions import IntegrationError, ServiceUnavailableError, ValidationError
 
 logger = logging.getLogger(__name__)
 MODEL_NAME = "gemini-3.1-pro-preview"
 MAX_MODEL_PAYLOAD_CHARS = 120_000
+REQUEST_TIMEOUT_MS = 45_000
+ATS_REQUEST_TIMEOUT_MS = 120_000
+
+
+def _is_temporary_upstream_error(exc: Exception) -> bool:
+    from google.genai.errors import ServerError
+
+    if isinstance(exc, ServerError):
+        code = getattr(exc, "code", None)
+        if code in {503, 504}:
+            return True
+
+    text = str(exc).upper()
+    return "DEADLINE_EXCEEDED" in text or "GATEWAY TIMEOUT" in text
 
 
 @dataclass(frozen=True)
@@ -34,19 +46,26 @@ class GeminiRequest:
 
 
 def _serialize_payload(payload: Dict[str, Any]) -> str:
-    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    # Use indent=2 because LLMs process formatted JSON much faster than dense minified JSON
+    text = json.dumps(payload, indent=2)
     if len(text) > MAX_MODEL_PAYLOAD_CHARS:
-        raise IntegrationError(
-            f"Model payload is too large: {len(text)} characters. "
-            "Reduce resume text or job description length."
-        )
+        # Fallback to minified if too large
+        text = json.dumps(payload, separators=(",", ":"))
+        if len(text) > MAX_MODEL_PAYLOAD_CHARS:
+            raise IntegrationError(
+                f"Model payload is too large: {len(text)} characters. "
+                "Reduce resume text or job description length."
+            )
     return text
 
 
 @retry(
-    retry=retry_if_exception_type(IntegrationError),
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=0.5, min=0.5, max=4),
+    retry=retry_if_exception(
+        lambda exc: isinstance(exc, IntegrationError)
+        and not isinstance(exc, ServiceUnavailableError)
+    ),
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1.5, min=2, max=10),
     reraise=True,
 )
 def call_gemini_json(
@@ -54,11 +73,15 @@ def call_gemini_json(
     system_prompt: str,
     payload: Dict[str, Any],
     temperature: float = 0.3,
+    request_timeout_ms: int = REQUEST_TIMEOUT_MS,
 ) -> Dict[str, Any]:
     body = _serialize_payload(payload)
 
     try:
-        client = genai.Client(api_key=api_key)
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(timeout=request_timeout_ms),
+        )
         response = client.models.generate_content(
             model=MODEL_NAME,
             contents=body,
@@ -72,8 +95,21 @@ def call_gemini_json(
             ),
         )
     except Exception as exc:
-        logger.warning("Gemini request failed: %s", exc.__class__.__name__)
-        raise IntegrationError("Gemini request failed.") from exc
+        if _is_temporary_upstream_error(exc):
+            logger.warning("Gemini API temporarily unavailable: %s", exc)
+            raise ServiceUnavailableError(
+                "Gemini API is temporarily unavailable right now. Please try again in a minute."
+            ) from exc
+        
+        # httpx raises TimeoutException on socket timeout
+        if "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower():
+            logger.warning("Gemini request timed out: %s", exc.__class__.__name__)
+            raise ServiceUnavailableError(
+                "Gemini API timed out. Please try again in a moment."
+            ) from exc
+
+        logger.warning(f"Gemini request failed: {exc.__class__.__name__}: {str(exc)}")
+        raise IntegrationError(f"Gemini request failed: {str(exc)}") from exc
 
     response_text = (response.text or "").strip()
     if not response_text:
@@ -117,10 +153,18 @@ def revise_resume_content(
     current_resume: Optional[Dict[str, Any]] = None,
     resume_text: Optional[str] = None,
 ) -> Dict[str, Any]:
+    truncated_resume = None
+    if current_resume:
+        truncated_resume = dict(current_resume)
+        if "work_experience" in truncated_resume and isinstance(truncated_resume["work_experience"], list):
+            if len(truncated_resume["work_experience"]) > 5:
+                logger.info("Truncating current resume to save tokens.")
+                truncated_resume["work_experience"] = truncated_resume["work_experience"][:5]
+
     payload: Dict[str, Any] = {
         "revision_notes": revision_notes,
         "raw_data": raw_data or {},
-        "current_resume": current_resume or {},
+        "current_resume": truncated_resume or {},
         "existing_resume_text": resume_text or "",
     }
 
@@ -184,13 +228,14 @@ def verify_ats_compatibility(
     payload = {
         "resume": resume,
         "target_role": target_role,
-        "job_description": job_description
+        "job_description": job_description,
     }
     parsed = call_gemini_json(
         api_key=api_key,
         system_prompt=ATS_VERIFICATION_SYSTEM_PROMPT,
         payload=payload,
         temperature=0.1,
+        request_timeout_ms=ATS_REQUEST_TIMEOUT_MS,
     )
     
     try:

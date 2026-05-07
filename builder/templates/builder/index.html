@@ -347,6 +347,11 @@
             display: none;
         }
 
+        .is-loading {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
         .sidebar-stack {
             display: grid;
             gap: 0.9rem;
@@ -372,6 +377,124 @@
             width: 18px;
             height: 18px;
             accent-color: #111111;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.35rem 0.7rem;
+            border-radius: 999px;
+            font-size: 0.74rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            border: 1px solid rgba(20, 20, 20, 0.12);
+            background: #ffffff;
+            color: var(--text-soft);
+        }
+
+        .status-pill.running {
+            color: #8f5400;
+            border-color: rgba(143, 84, 0, 0.25);
+            background: #fff6e8;
+        }
+
+        .status-pill.success {
+            color: #0e6b3f;
+            border-color: rgba(14, 107, 63, 0.24);
+            background: #eaf8f1;
+        }
+
+        .status-pill.error {
+            color: #9b1f1f;
+            border-color: rgba(155, 31, 31, 0.25);
+            background: #fdeeee;
+        }
+
+        .btn[disabled] {
+            opacity: 0.55;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #ats-results-content {
+            display: grid;
+            gap: 1rem;
+        }
+
+        .ats-skeleton {
+            padding: 1rem;
+            border-radius: 12px;
+            border: 1px dashed rgba(20, 20, 20, 0.2);
+            color: var(--text-muted);
+            background: #fdfcf9;
+        }
+
+        .ats-top-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: baseline;
+            gap: 0.75rem 1.15rem;
+            border-bottom: 1px solid rgba(20, 20, 20, 0.09);
+            padding-bottom: 0.9rem;
+        }
+
+        .ats-score {
+            margin: 0;
+            font-size: clamp(2rem, 6vw, 2.7rem);
+            line-height: 1;
+            letter-spacing: -0.03em;
+        }
+
+        .ats-score.good {
+            color: #0e6b3f;
+        }
+
+        .ats-score.warn {
+            color: #8f5400;
+        }
+
+        .ats-score.bad {
+            color: #9b1f1f;
+        }
+
+        .ats-meta {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        .ats-block {
+            border: 1px solid rgba(20, 20, 20, 0.1);
+            border-radius: 12px;
+            padding: 0.85rem 0.95rem;
+            background: #ffffff;
+        }
+
+        .ats-block h4 {
+            margin: 0 0 0.4rem;
+            font-size: 0.86rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .ats-block ul {
+            margin: 0;
+            padding-left: 1.1rem;
+            color: var(--text-muted);
+        }
+
+        .ats-block li + li {
+            margin-top: 0.25rem;
+        }
+
+        .ats-error {
+            padding: 0.85rem 0.95rem;
+            border-radius: 12px;
+            color: #9b1f1f;
+            border: 1px solid rgba(155, 31, 31, 0.2);
+            background: #fdeeee;
+            font-weight: 600;
         }
 
         @media (max-width: 1024px) {
@@ -598,6 +721,7 @@
             <div class="submit-copy">
                 <h3>Ready to Generate</h3>
                 <p>Export a polished resume package in the format you need.</p>
+                <div id="ats-run-state" class="status-pill" aria-live="polite">ATS idle</div>
             </div>
             <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: flex-end;">
                 <button type="button" id="verify-ats-btn" class="btn btn-outline" style="padding: 1rem 1.5rem; font-size: 1rem;">Check ATS Score</button>
@@ -787,91 +911,168 @@
     }
 
     // ATS Verification Logic
-    document.getElementById('verify-ats-btn').addEventListener('click', async function(e) {
+    const verifyAtsBtn = document.getElementById('verify-ats-btn');
+    const atsRunState = document.getElementById('ats-run-state');
+    const atsResultsContainer = document.getElementById('ats-results-container');
+    const atsResultsContent = document.getElementById('ats-results-content');
+    let activeAtsPoll = null;
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
+    function setAtsState(text, variant) {
+        atsRunState.textContent = text;
+        atsRunState.classList.remove('running', 'success', 'error');
+        if (variant) {
+            atsRunState.classList.add(variant);
+        }
+    }
+
+    function renderAtsError(message) {
+        atsResultsContent.innerHTML = `<div class="ats-error">${escapeHtml(message)}</div>`;
+    }
+
+    verifyAtsBtn.addEventListener('click', async function(e) {
         e.preventDefault();
         const form = document.getElementById('resume-form');
         const formData = new FormData(form);
-        const resultsContainer = document.getElementById('ats-results-container');
-        const resultsContent = document.getElementById('ats-results-content');
+
+        if (activeAtsPoll) {
+            clearInterval(activeAtsPoll);
+            activeAtsPoll = null;
+        }
+
+        verifyAtsBtn.disabled = true;
+        verifyAtsBtn.classList.add('is-loading');
+        verifyAtsBtn.textContent = 'Checking ATS...';
+        setAtsState('ATS running', 'running');
         
-        resultsContainer.classList.remove('hidden-panel');
-        resultsContent.innerHTML = '<p>Analyzing resume against ATS guidelines and target role... This may take a minute.</p>';
-        resultsContainer.scrollIntoView({ behavior: 'smooth' });
+        atsResultsContainer.classList.remove('hidden-panel');
+        atsResultsContent.innerHTML = '<div class="ats-skeleton">Analyzing resume against ATS guidelines and target role. This may take a minute.</div>';
+        atsResultsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         
         try {
             const response = await fetch("{% url 'verify_ats' %}", {
                 method: 'POST',
                 body: formData,
             });
+
+            if (!response.ok) {
+                throw new Error(`Request failed with ${response.status}`);
+            }
+
             const data = await response.json();
             
             if (data.error) {
-                resultsContent.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                renderAtsError(`Error: ${data.error}`);
+                setAtsState('ATS failed', 'error');
                 return;
             }
             
             if (!data.job_id) {
-                 resultsContent.innerHTML = `<p style="color: red;">Error: Failed to initiate background job.</p>`;
+                 renderAtsError('Error: Failed to initiate background job.');
+                 setAtsState('ATS failed', 'error');
                  return;
             }
 
-            const pollInterval = setInterval(async () => {
+            let attempts = 0;
+            const maxAttempts = 180;
+
+            activeAtsPoll = setInterval(async () => {
                 try {
+                    attempts += 1;
+                    if (attempts > maxAttempts) {
+                        clearInterval(activeAtsPoll);
+                        activeAtsPoll = null;
+                        renderAtsError('ATS check timed out in the UI. Please retry.');
+                        setAtsState('ATS timed out', 'error');
+                        return;
+                    }
+
                     const statusRes = await fetch(`/job-status/${data.job_id}/`);
+                    if (!statusRes.ok) {
+                        throw new Error(`Status check failed with ${statusRes.status}`);
+                    }
                     const statusData = await statusRes.json();
                     
                     if (statusData.error) {
-                        clearInterval(pollInterval);
-                        resultsContent.innerHTML = `<p style="color: red;">Error: ${statusData.error}</p>`;
+                        clearInterval(activeAtsPoll);
+                        activeAtsPoll = null;
+                        renderAtsError(`Error: ${statusData.error}`);
+                        setAtsState('ATS failed', 'error');
                         return;
                     }
                     
                     if (statusData.status === 'failed') {
-                        clearInterval(pollInterval);
-                        resultsContent.innerHTML = `<p style="color: red;">Error: ATS check failed. ${statusData.error || ''}</p>`;
+                        clearInterval(activeAtsPoll);
+                        activeAtsPoll = null;
+                        renderAtsError(`Error: ATS check failed. ${statusData.error || ''}`);
+                        setAtsState('ATS failed', 'error');
                         return;
                     }
                     
                     if (statusData.status === 'complete') {
-                        clearInterval(pollInterval);
+                        clearInterval(activeAtsPoll);
+                        activeAtsPoll = null;
                         const result = statusData.result;
+
+                        const score = Number(result.ats_score || 0);
+                        const scoreClass = score > 75 ? 'good' : (score > 50 ? 'warn' : 'bad');
+                        const missingKeywords = Array.isArray(result.missing_keywords) ? result.missing_keywords : [];
+                        const formattingFeedback = Array.isArray(result.formatting_feedback) ? result.formatting_feedback : [];
+                        const contentFeedback = Array.isArray(result.content_feedback) ? result.content_feedback : [];
+                        const keywordRate = escapeHtml(result.keyword_match_rate || 'N/A');
+                        const recommendation = escapeHtml(result.overall_recommendation || 'No recommendation returned.');
+
+                        const listHtml = (items) => items.map(item => `<li>${escapeHtml(item)}</li>`).join('');
                         
                         let html = `
-                            <div style="display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1rem;">
-                                <h3 style="font-size: 2.5rem; margin: 0; color: ${result.ats_score > 75 ? 'green' : (result.ats_score > 50 ? 'orange' : 'red')}">${result.ats_score}/100</h3>
-                                <strong>Match Rate:</strong> ${result.keyword_match_rate}
+                            <div class="ats-top-row">
+                                <h3 class="ats-score ${scoreClass}">${escapeHtml(score)}/100</h3>
+                                <div class="ats-meta"><strong>Match Rate:</strong> ${keywordRate}</div>
                             </div>
-                            <div style="margin-bottom: 1rem;"><strong>Overall Recommendation:</strong> ${result.overall_recommendation}</div>
+                            <div class="ats-block">
+                                <h4>Overall Recommendation</h4>
+                                <p style="margin: 0; color: var(--text-muted);">${recommendation}</p>
+                            </div>
                         `;
                         
-                        if (result.missing_keywords && result.missing_keywords.length > 0) {
-                            html += `<h4>Missing Keywords</h4><ul style="margin-bottom: 1rem;">`;
-                            result.missing_keywords.forEach(kw => html += `<li>${kw}</li>`);
-                            html += `</ul>`;
+                        if (missingKeywords.length > 0) {
+                            html += `<div class="ats-block"><h4>Missing Keywords</h4><ul>${listHtml(missingKeywords)}</ul></div>`;
                         }
                         
-                        if (result.formatting_feedback && result.formatting_feedback.length > 0) {
-                            html += `<h4>Formatting Feedback</h4><ul style="margin-bottom: 1rem;">`;
-                            result.formatting_feedback.forEach(fb => html += `<li>${fb}</li>`);
-                            html += `</ul>`;
+                        if (formattingFeedback.length > 0) {
+                            html += `<div class="ats-block"><h4>Formatting Feedback</h4><ul>${listHtml(formattingFeedback)}</ul></div>`;
                         }
                         
-                        if (result.content_feedback && result.content_feedback.length > 0) {
-                            html += `<h4>Content Feedback</h4><ul style="margin-bottom: 1rem;">`;
-                            result.content_feedback.forEach(fb => html += `<li>${fb}</li>`);
-                            html += `</ul>`;
+                        if (contentFeedback.length > 0) {
+                            html += `<div class="ats-block"><h4>Content Feedback</h4><ul>${listHtml(contentFeedback)}</ul></div>`;
                         }
                         
-                        resultsContent.innerHTML = html;
+                        atsResultsContent.innerHTML = html;
+                        setAtsState('ATS complete', 'success');
                     }
                 } catch (pollErr) {
-                    clearInterval(pollInterval);
-                    resultsContent.innerHTML = `<p style="color: red;">Failed to poll ATS score. ${pollErr.message}</p>`;
+                    clearInterval(activeAtsPoll);
+                    activeAtsPoll = null;
+                    renderAtsError(`Failed to poll ATS score. ${pollErr.message}`);
+                    setAtsState('ATS failed', 'error');
                 }
             }, 1000);
             
         } catch (err) {
-            resultsContent.innerHTML = `<p style="color: red;">Failed to initiate ATS score check. ${err.message}</p>`;
+            renderAtsError(`Failed to initiate ATS score check. ${err.message}`);
+            setAtsState('ATS failed', 'error');
+        } finally {
+            verifyAtsBtn.disabled = false;
+            verifyAtsBtn.classList.remove('is-loading');
+            verifyAtsBtn.textContent = 'Check ATS Score';
         }
     });
 

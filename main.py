@@ -10,7 +10,10 @@ from services import (
     get_google_credentials,
     get_gdoc_text,
     upload_to_gdoc,
-    verify_ats_compatibility
+    verify_ats_compatibility,
+    ServiceUnavailableError,
+    IntegrationError,
+    ValidationError,
 )
 from services.filenames import sanitize_filename
 
@@ -30,6 +33,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MODEL_NAME = "gemini-3.1-pro-preview"
+DEFAULT_REVISION_NOTES = (
+    "Improve ATS clarity and wording while preserving all existing facts and sections."
+)
 
 # --- Models removed to services/ ---
 
@@ -119,6 +125,14 @@ def collect_revision_notes() -> str:
         notes.append(note)
 
     return "\n".join(notes)
+
+
+def ensure_revision_notes(notes: str) -> str:
+    cleaned = (notes or "").strip()
+    if cleaned:
+        return cleaned
+    logger.info("No revision notes provided. Using default revision instructions.")
+    return DEFAULT_REVISION_NOTES
 
 
 # removed
@@ -297,6 +311,11 @@ def parse_args() -> argparse.Namespace:
         description="Generate an ATS-optimized resume and optional cover letter with Gemini."
     )
     parser.add_argument(
+        "--check",
+        choices=["generate", "revise", "ats", "all"],
+        help="Run non-interactive API health checks and exit.",
+    )
+    parser.add_argument(
         "--format",
         choices=["pdf", "docx", "both", "gdocs"],
         default="both",
@@ -421,19 +440,96 @@ def print_ats_verification_report(report: Dict[str, Any]) -> None:
     logger.info("=========================================================\n")
 
 
+def run_api_checks(check: str, api_key: str) -> None:
+    sample_resume = {
+        "professional_summary": "Backend engineer focused on scalable APIs and reliability.",
+        "work_experience": [
+            {
+                "title": "Software Engineer",
+                "company": "Check Corp",
+                "location": "Remote",
+                "dates": "2022-Present",
+                "bullets": [
+                    "Implemented API caching to reduce latency by 35%.",
+                    "Improved CI reliability and reduced deployment failures.",
+                ],
+            }
+        ],
+        "education": [
+            {
+                "institution": "State University",
+                "degree": "B.S. Computer Science",
+                "location": "CA",
+                "dates": "2018-2022",
+                "details": "",
+            }
+        ],
+        "skills": ["Python", "Django", "SQL", "CI/CD"],
+    }
+
+    if check in {"generate", "all"}:
+        logger.info("Running generation API check...")
+        sample_raw_data = {
+            "full_name": "Check Candidate",
+            "contact_info": "check@example.com | 555-0100",
+            "summary": "Backend engineer with Python and Django experience.",
+            "work_experience": [
+                {
+                    "title": "Software Engineer",
+                    "company": "Check Corp",
+                    "location": "Remote",
+                    "dates": "2022-Present",
+                    "bullets": ["Built APIs and reduced response times by 30%."],
+                }
+            ],
+            "education": [
+                {
+                    "institution": "State University",
+                    "degree": "B.S. Computer Science",
+                    "dates": "2018-2022",
+                    "location": "CA",
+                    "details": "",
+                }
+            ],
+            "skills": ["Python", "Django", "SQL"],
+        }
+        generate_resume_content(sample_raw_data, api_key)
+        logger.info("Generation API check passed.")
+
+    if check in {"ats", "all"}:
+        logger.info("Running ATS API check...")
+        verify_ats_compatibility(
+            resume=sample_resume,
+            target_role="Backend Engineer",
+            job_description="Seeking Python, Django, SQL, API performance, and CI/CD experience.",
+            api_key=api_key,
+        )
+        logger.info("ATS API check passed.")
+    if check == "revise":
+        logger.info("Running revision API check...")
+        revise_resume_content(
+            api_key=api_key,
+            revision_notes="Add Django to skills and improve summary.",
+            current_resume=sample_resume,
+        )
+        logger.info("Revision API check passed.")
+
+
 def main() -> None:
     args = parse_args()
     api_key = setup_environment(args.dir)
+
+    if args.check:
+        run_api_checks(args.check, api_key)
+        print("Check complete.")
+        return
 
     if args.input or args.gdoc_id:
         if args.gdoc_id:
             creds = get_google_credentials()
             resume_text = get_gdoc_text(args.gdoc_id, creds)
             
-            revision_notes = args.notes or collect_revision_notes()
-            if not revision_notes:
-                logger.error("ERROR: Revision notes are required for revision.")
-                sys.exit(1)
+            revision_notes = ensure_revision_notes(args.notes or collect_revision_notes())
         else:
             input_path = args.input.expanduser().resolve()
             if input_path.suffix.lower() != ".docx":
@@ -444,10 +540,7 @@ def main() -> None:
                 sys.exit(1)
 
             resume_text = extract_docx_text(input_path)
-            revision_notes = args.notes or collect_revision_notes()
-            if not revision_notes:
-                logger.error("ERROR: Revision notes are required in --input mode.")
-                sys.exit(1)
+            revision_notes = ensure_revision_notes(args.notes or collect_revision_notes())
 
         revised = revise_resume_content(
             api_key=api_key,
@@ -551,4 +644,11 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ServiceUnavailableError as exc:
+        logger.error("Temporary upstream error: %s", exc)
+        sys.exit(2)
+    except (IntegrationError, ValidationError) as exc:
+        logger.error("Generation failed: %s", exc)
+        sys.exit(1)

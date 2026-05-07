@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from builder.utils import build_resume_from_payload, run_resume_workflow
 from builder.jobs import submit_job
 from services.filenames import sanitize_filename
+from services.exceptions import ServiceUnavailableError
 
 
 
@@ -264,24 +265,32 @@ def parse_resume_form(request):
     return raw_data, options, file_hash_content
 
 
+def compute_resume_cache_hash(
+    raw_data: dict,
+    options: dict,
+    file_hash_content: bytes,
+) -> str:
+    # Only include fields that affect resume generation/revision output.
+    hash_payload = {
+        "raw_data": raw_data,
+        "mode": options.get("mode", "scratch"),
+        "revision_notes": options.get("revision_notes", ""),
+    }
+    return hashlib.sha256(
+        json.dumps(hash_payload, sort_keys=True).encode("utf-8") + file_hash_content
+    ).hexdigest()
+
+
 def generate(request):
     """Handle form submission and trigger resume generation."""
     if request.method == 'POST':
         raw_data, options, file_hash_content = parse_resume_form(request)
         original_format = request.POST.get('format', 'pdf')
 
-        hash_payload = {
-            "raw_data": raw_data,
-            "mode": options["mode"],
-            "generate_cl": options["generate_cl"],
-            "target_role": options["target_role"],
-            "target_company": options["target_company"],
-            "revision_notes": options["revision_notes"]
-        }
-        payload_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode('utf-8') + file_hash_content).hexdigest()
-        
-        if request.session.get('last_generation_hash') == payload_hash:
-            cached_data = cache.get(payload_hash)
+        resume_hash = compute_resume_cache_hash(raw_data, options, file_hash_content)
+
+        if request.session.get('last_resume_hash') == resume_hash:
+            cached_data = cache.get(resume_hash)
             if cached_data:
                 options['cached_resume'] = cached_data.get('cached_resume')
                 options['cached_cover_letter'] = cached_data.get('cached_cover_letter')
@@ -292,12 +301,12 @@ def generate(request):
             file_stream, filename, out_resume, out_cover_letter, out_raw_data = build_resume_from_payload(raw_data, options)
             
             # Save to cache
-            cache.set(payload_hash, {
+            cache.set(resume_hash, {
                 'cached_resume': out_resume,
                 'cached_cover_letter': out_cover_letter,
                 'cached_raw_data': out_raw_data,
             }, timeout=3600)  # 1 hour
-            request.session['last_generation_hash'] = payload_hash
+            request.session['last_resume_hash'] = resume_hash
             
             if original_format == "gdocs":
                 write_session_upload_file(request, file_stream, filename)
@@ -314,6 +323,14 @@ def generate(request):
             if is_pdf:
                 response['Content-Disposition'] = f'inline; filename="{filename}"'
             return response
+        except ServiceUnavailableError as exc:
+            return safe_error_response(
+                request,
+                log_message="Resume generation deferred because Gemini is overloaded.",
+                user_message=str(exc),
+                status=503,
+                exc=exc,
+            )
             
         except Exception as exc:
             return safe_error_response(
@@ -336,31 +353,24 @@ def verify_ats(request):
         if not api_key:
             return JsonResponse({"error": "GEMINI_API_KEY is not configured."}, status=500)
             
-        hash_payload = {
-            "raw_data": raw_data,
-            "mode": options["mode"],
-            "generate_cl": False, # no need to generate cover letter for ATS check
-            "target_role": options["target_role"],
-            "target_company": options["target_company"],
-            "revision_notes": options["revision_notes"]
-        }
-        payload_hash = hashlib.sha256(json.dumps(hash_payload, sort_keys=True).encode('utf-8') + file_hash_content).hexdigest()
-        
-        if request.session.get('last_generation_hash') == payload_hash:
-            cached_data = cache.get(payload_hash)
-            if cached_data:
-                options['cached_resume'] = cached_data.get('cached_resume')
-                options['cached_raw_data'] = cached_data.get('cached_raw_data')
+        resume_hash = compute_resume_cache_hash(raw_data, options, file_hash_content)
+        cached_data = cache.get(resume_hash)
+        if cached_data:
+            options['cached_resume'] = cached_data.get('cached_resume')
+            options['cached_cover_letter'] = cached_data.get('cached_cover_letter')
+            options['cached_raw_data'] = cached_data.get('cached_raw_data')
 
         try:
             def run_ats_check():
+                # Force generate_cl to False so ATS standalone check doesn't redundantly wait 20s to make a cover letter
+                options["generate_cl"] = False
                 workflow_result = run_resume_workflow(raw_data, options)
                 out_resume = workflow_result.resume
                 out_raw_data = workflow_result.raw_data
                 
-                cache.set(payload_hash, {
+                cache.set(resume_hash, {
                     'cached_resume': out_resume,
-                    'cached_cover_letter': None,
+                    'cached_cover_letter': options.get('cached_cover_letter'),
                     'cached_raw_data': out_raw_data,
                 }, timeout=3600)
                 
@@ -373,7 +383,7 @@ def verify_ats(request):
                 )
 
             job_id = submit_job(run_ats_check)
-            request.session['last_generation_hash'] = payload_hash
+            request.session['last_resume_hash'] = resume_hash
             return JsonResponse({"job_id": job_id})
             
         except Exception as exc:

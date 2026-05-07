@@ -13,6 +13,7 @@ A Python application that generates and revises ATS-optimized resumes and tailor
 - **Google Drive Integration** — Pick any Google Doc from your Drive directly in the browser via the **Google Picker API**, powered by Google Identity Services (GIS) and FedCM-compatible OAuth 2.0.
 - **Multiple Output Formats** — Export to `.pdf`, `.docx`, both simultaneously, or directly to **Google Docs** via the Google Drive API.
 - **Dry-Run Mode** — Preview the generated JSON output without writing any files.
+- **API Check Mode** — Run `generate`, `revise`, and `ats` checks independently from the CLI without creating files or completing the full workflow.
 - **Revision Diff Summary** — See a structured log of exactly what changed between resume versions.
 - **Web UI** — A Django-powered browser interface supporting form-based generation, file uploads, and Google Drive file selection.
 - **Pydantic Schema Validation** — Every Gemini response is validated against strict Pydantic v2 models before any file is written.
@@ -163,12 +164,14 @@ python main.py
 ### Full Options
 
 ```text
-usage: main.py [-h] [--format {pdf,docx,both,gdocs}] [--output OUTPUT] [--dir DIR]
+usage: main.py [-h] [--check {generate,revise,ats,all}] [--format {pdf,docx,both,gdocs}] [--output OUTPUT] [--dir DIR]
                [--revise] [--cl] [--verify] [--input INPUT] [--gdoc-id GDOC_ID]
                [--gdoc-update] [--notes NOTES] [--dry-run]
 
 options:
   -h, --help                    show this help message and exit
+  --check {generate,revise,ats,all}
+                                Run non-interactive API health checks and exit.
   --format {pdf,docx,both,gdocs}
                                 Output format. 'gdocs' uploads the result directly
                                 to Google Drive as a Google Doc. (default: both)
@@ -190,6 +193,22 @@ options:
 
 ```bash
 python main.py --cl
+```
+
+**Run API checks without generating files:**
+
+```bash
+# Only resume generation path
+python main.py --check generate
+
+# Only ATS verification path
+python main.py --check ats
+
+# Only revision path
+python main.py --check revise
+
+# Run all checks
+python main.py --check all
 ```
 
 Expected output files:

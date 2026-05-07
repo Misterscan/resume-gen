@@ -1,10 +1,14 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import logging
 from uuid import uuid4
 
 from django.core.cache import cache
 
+from services.exceptions import ServiceUnavailableError
+
 executor = ThreadPoolExecutor(max_workers=4)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -27,10 +31,18 @@ def submit_job(fn, *args, **kwargs) -> str:
                 JobStatus(status="complete", result=result).__dict__,
                 timeout=3600,
             )
-        except Exception:
+        except ServiceUnavailableError as exc:
+            logger.warning("Job deferred because upstream service is unavailable: %s", exc)
             cache.set(
                 f"job:{job_id}",
-                JobStatus(status="failed", error="Job failed.").__dict__,
+                JobStatus(status="failed", error=str(exc)).__dict__,
+                timeout=3600,
+            )
+        except Exception as e:
+            logger.error("Job failed", exc_info=True)
+            cache.set(
+                f"job:{job_id}",
+                JobStatus(status="failed", error=str(e)).__dict__,
                 timeout=3600,
             )
 

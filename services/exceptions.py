@@ -10,6 +10,10 @@ class IntegrationError(ResumeGenException):
     """Raised when a third-party API integration fails (e.g. Google Drive, Gemini)."""
     pass
 
+class ServiceUnavailableError(IntegrationError):
+    """Raised when a third-party service is temporarily unavailable."""
+    pass
+
 class DocumentError(ResumeGenException):
     """Raised when a document generation or parsing fails."""
     pass

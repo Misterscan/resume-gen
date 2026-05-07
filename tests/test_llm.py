@@ -1,12 +1,14 @@
 import pytest
 from unittest.mock import patch, MagicMock
+from google.genai.errors import ServerError
 from services.llm import (
+    call_gemini_json,
     generate_resume_content,
     revise_resume_content,
     generate_cover_letter_content,
     verify_ats_compatibility,
 )
-from services.exceptions import IntegrationError, ValidationError
+from services.exceptions import IntegrationError, ServiceUnavailableError, ValidationError
 
 
 VALID_RESUME_JSON = """
@@ -151,3 +153,76 @@ def test_verify_ats_compatibility_general_scan(mock_genai_client):
 
     assert isinstance(result["ats_score"], int)
     assert 0 <= result["ats_score"] <= 100
+
+
+@patch("services.llm.genai.Client")
+def test_call_gemini_json_does_not_outer_retry_on_503(mock_genai_client):
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = ServerError(
+        503,
+        {
+            "error": {
+                "code": 503,
+                "message": "This model is currently experiencing high demand.",
+                "status": "UNAVAILABLE",
+            }
+        },
+        None,
+    )
+    mock_genai_client.return_value = mock_client
+
+    with pytest.raises(ServiceUnavailableError):
+        call_gemini_json(
+            api_key="dummy_key",
+            system_prompt="prompt",
+            payload={"raw_data": {}},
+        )
+
+    assert mock_client.models.generate_content.call_count == 1
+
+
+@patch("services.llm.genai.Client")
+def test_call_gemini_json_does_not_outer_retry_on_504(mock_genai_client):
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = ServerError(
+        504,
+        {
+            "error": {
+                "code": 504,
+                "message": "Deadline expired before operation could complete.",
+                "status": "DEADLINE_EXCEEDED",
+            }
+        },
+        None,
+    )
+    mock_genai_client.return_value = mock_client
+
+    with pytest.raises(ServiceUnavailableError):
+        call_gemini_json(
+            api_key="dummy_key",
+            system_prompt="prompt",
+            payload={"raw_data": {}},
+        )
+
+    assert mock_client.models.generate_content.call_count == 1
+
+
+@patch("services.llm.genai.Client")
+def test_call_gemini_json_does_not_outer_retry_on_deadline_exceeded_text(mock_genai_client):
+    class FakeDeadlineError(Exception):
+        pass
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = FakeDeadlineError(
+        "504 DEADLINE_EXCEEDED. {'error': {'code': 504, 'status': 'DEADLINE_EXCEEDED'}}"
+    )
+    mock_genai_client.return_value = mock_client
+
+    with pytest.raises(ServiceUnavailableError):
+        call_gemini_json(
+            api_key="dummy_key",
+            system_prompt="prompt",
+            payload={"raw_data": {}},
+        )
+
+    assert mock_client.models.generate_content.call_count == 1
