@@ -505,7 +505,7 @@ def run_api_checks(check: str, api_key: str) -> None:
             api_key=api_key,
         )
         logger.info("ATS API check passed.")
-    if check == "revise":
+    if check in {"revise", "all"}:
         logger.info("Running revision API check...")
         revise_resume_content(
             api_key=api_key,
