@@ -11,6 +11,7 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from prompts import (
     RESUME_SYSTEM_PROMPT,
+    RESUME_NO_EXP_SYSTEM_PROMPT,
     REVISION_SYSTEM_PROMPT,
     COVER_LETTER_SYSTEM_PROMPT,
     ATS_VERIFICATION_SYSTEM_PROMPT,
@@ -133,9 +134,11 @@ def generate_resume_content(
     raw_data: Dict[str, Any],
     api_key: str,
 ) -> Dict[str, Any]:
+    # Use a dedicated prompt if no_work_experience is set
+    system_prompt = RESUME_NO_EXP_SYSTEM_PROMPT if raw_data.get("no_work_experience") else RESUME_SYSTEM_PROMPT
     parsed = call_gemini_json(
         api_key=api_key,
-        system_prompt=RESUME_SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         payload={"raw_data": raw_data},
         temperature=0.3,
     )

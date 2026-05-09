@@ -94,6 +94,35 @@ def format_education_line(item: Dict[str, Any]) -> str:
     return " | ".join(str(part).strip() for part in parts if str(part).strip())
 
 
+def format_project_line(item: Dict[str, Any]) -> str:
+    parts = [
+        item.get("name", ""),
+        item.get("organization", ""),
+        item.get("location", ""),
+        item.get("dates", ""),
+    ]
+    return " | ".join(str(part).strip() for part in parts if str(part).strip())
+
+
+def format_volunteer_line(item: Dict[str, Any]) -> str:
+    parts = [
+        item.get("role", ""),
+        item.get("organization", ""),
+        item.get("location", ""),
+        item.get("dates", ""),
+    ]
+    return " | ".join(str(part).strip() for part in parts if str(part).strip())
+
+
+def format_certification_line(item: Dict[str, Any]) -> str:
+    parts = [
+        item.get("name", ""),
+        item.get("issuer", ""),
+        item.get("dates", ""),
+    ]
+    return " | ".join(str(part).strip() for part in parts if str(part).strip())
+
+
 def add_heading(document: Document, text: str) -> None:
     paragraph = document.add_paragraph()
     run = paragraph.add_run(text.upper())
@@ -130,6 +159,34 @@ def generate_docx_stream(resume: Dict[str, Any], raw_data: Dict[str, Any]) -> io
             role_run.bold = True
             for bullet in item.get("bullets", []):
                 document.add_paragraph(bullet, style="List Bullet")
+
+        if resume.get("projects"):
+            add_heading(document, "Projects")
+            for item in resume.get("projects", []):
+                project = document.add_paragraph()
+                project_run = project.add_run(format_project_line(item))
+                project_run.bold = True
+                for bullet in item.get("bullets", []):
+                    document.add_paragraph(bullet, style="List Bullet")
+
+        if resume.get("volunteer_experience"):
+            add_heading(document, "Volunteer Experience")
+            for item in resume.get("volunteer_experience", []):
+                volunteer = document.add_paragraph()
+                volunteer_run = volunteer.add_run(format_volunteer_line(item))
+                volunteer_run.bold = True
+                for bullet in item.get("bullets", []):
+                    document.add_paragraph(bullet, style="List Bullet")
+
+        if resume.get("certifications"):
+            add_heading(document, "Certifications")
+            for item in resume.get("certifications", []):
+                cert = document.add_paragraph()
+                cert_run = cert.add_run(format_certification_line(item))
+                cert_run.bold = True
+                details = item.get("details", "")
+                if details:
+                    document.add_paragraph(details)
 
         add_heading(document, "Education")
         for item in resume.get("education", []):
@@ -338,6 +395,45 @@ def generate_pdf_stream(resume: Dict[str, Any], raw_data: Dict[str, Any]) -> io.
             for bullet in item.get("bullets", []):
                 pdf.bullet(bullet)
             pdf.ln(PDFConfig.SPACING_SMALL)
+
+        if resume.get("projects"):
+            pdf.section_heading("Projects")
+            for item in resume.get("projects", []):
+                pdf.bold_line(
+                    f"{item.get('name', '')} | "
+                    f"{item.get('organization', '')} | "
+                    f"{item.get('location', '')} | "
+                    f"{item.get('dates', '')}"
+                )
+                for bullet in item.get("bullets", []):
+                    pdf.bullet(bullet)
+                pdf.ln(PDFConfig.SPACING_SMALL)
+
+        if resume.get("volunteer_experience"):
+            pdf.section_heading("Volunteer Experience")
+            for item in resume.get("volunteer_experience", []):
+                pdf.bold_line(
+                    f"{item.get('role', '')} | "
+                    f"{item.get('organization', '')} | "
+                    f"{item.get('location', '')} | "
+                    f"{item.get('dates', '')}"
+                )
+                for bullet in item.get("bullets", []):
+                    pdf.bullet(bullet)
+                pdf.ln(PDFConfig.SPACING_SMALL)
+
+        if resume.get("certifications"):
+            pdf.section_heading("Certifications")
+            for item in resume.get("certifications", []):
+                pdf.bold_line(
+                    f"{item.get('name', '')} | "
+                    f"{item.get('issuer', '')} | "
+                    f"{item.get('dates', '')}"
+                )
+                details = item.get("details", "")
+                if details:
+                    pdf.paragraph(details)
+                pdf.ln(PDFConfig.SPACING_SMALL)
 
         pdf.section_heading("Education")
         for item in resume.get("education", []):

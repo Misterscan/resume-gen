@@ -5,6 +5,7 @@ from docx import Document
 from services.document import (
     extract_docx_text,
     generate_docx_stream,
+    generate_pdf_stream,
     generate_cover_letter_docx_stream,
 )
 from services.exceptions import DocumentError
@@ -21,6 +22,32 @@ def resume_data():
                 "location": "Remote",
                 "dates": "Jan 2020 - Present",
                 "bullets": ["Optimized backend.", "Led team."],
+            }
+        ],
+        "projects": [
+            {
+                "name": "Capstone Project",
+                "organization": "University",
+                "location": "Remote",
+                "dates": "2024",
+                "bullets": ["Built a full-stack app."],
+            }
+        ],
+        "volunteer_experience": [
+            {
+                "role": "Volunteer Tutor",
+                "organization": "Community Center",
+                "location": "City, State",
+                "dates": "2023 - Present",
+                "bullets": ["Tutored students weekly."],
+            }
+        ],
+        "certifications": [
+            {
+                "name": "Google Data Analytics Certificate",
+                "issuer": "Google",
+                "dates": "2025",
+                "details": "Completed coursework in SQL and spreadsheets.",
             }
         ],
         "education": [
@@ -69,6 +96,16 @@ def test_generate_docx_stream_returns_valid_bytesio(resume_data, raw_data):
     assert "test@example.com | 555-5555" in text
     assert "PROFESSIONAL SUMMARY" in text
     assert "Experienced software engineer" in text
+    assert "PROJECTS" in text
+    assert "VOLUNTEER EXPERIENCE" in text
+    assert "CERTIFICATIONS" in text
+
+
+def test_generate_pdf_stream_returns_valid_bytesio(resume_data, raw_data):
+    result_stream = generate_pdf_stream(resume_data, raw_data)
+
+    assert isinstance(result_stream, io.BytesIO)
+    assert len(result_stream.getvalue()) > 0
 
 
 def test_generate_cover_letter_docx_stream_returns_valid_bytesio(cover_letter_data, raw_data):

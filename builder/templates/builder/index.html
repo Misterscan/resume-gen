@@ -5,6 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ATS Resume Builder</title>
     <style>
+        nav {
+            background: #111111 !important;
+            border-bottom: 1px solid var(--border-strong);
+            padding: 0.85rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 9999;
+            width: 100%;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 2rem;
+            margin: 0 auto;
+            padding: 0;
+            max-width: 1220px;
+        }
+
+        nav ul li.brand {
+            margin-right: auto;
+            font-weight: 800;
+            font-size: 1.25rem;
+            letter-spacing: -0.03em;
+            color: #ffffff;
+        }
+
+        nav ul li.brand a {
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        nav ul li a {
+            text-decoration: none;
+            color: #eeeeee;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+
+        nav ul li a:hover {
+            color: #ffffff;
+            opacity: 0.8;
+        }
+
+        nav ul li a.btn-nav {
+            background: #ffffff;
+            color: #111111;
+            padding: 0.5rem 1.2rem;
+            border-radius: 6px;
+        }
+
+        nav ul li a.btn-nav:hover {
+            background: #f0f0f0;
+            transform: translateY(-1px);
+        }
+
         :root {
             --bg-body: #f5f2eb;
             --bg-surface: #ffffff;
@@ -138,6 +197,16 @@
             align-items: start;
         }
 
+        .page-layout.is-revise {
+            grid-template-columns: 1fr;
+            gap: 0.9rem;
+        }
+
+        .page-layout.is-revise .sidebar-stack {
+            position: static;
+            top: auto;
+        }
+
         .stack {
             display: grid;
             gap: 1rem;
@@ -164,6 +233,13 @@
             margin: 0 0 0.95rem;
             color: var(--text-soft);
             font-size: 0.92rem;
+        }
+
+        .source-truth-note {
+            margin: 0.75rem 0 0;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            line-height: 1.45;
         }
 
         .form-group {
@@ -225,6 +301,34 @@
             border: 1px solid rgba(20, 20, 20, 0.08);
             border-radius: 14px;
             background: #fcfcfb;
+        }
+
+        .remove-item-btn {
+            position: absolute;
+            top: 0.7rem;
+            right: 0.7rem;
+            background: #fff1f1;
+            border: 1px solid rgba(155, 31, 31, 0.35);
+            color: #9b1f1f;
+            border-radius: 999px;
+            font-size: 0.74rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            padding: 0.28rem 0.55rem;
+            cursor: pointer;
+            transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        }
+
+        .remove-item-btn:hover {
+            background: #ffe3e3;
+            border-color: rgba(155, 31, 31, 0.55);
+            color: #7a1717;
+        }
+
+        .remove-item-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
         }
 
         .list-item:last-child {
@@ -497,6 +601,65 @@
             font-weight: 600;
         }
 
+        .ats-benchmark-hint {
+            margin-top: 0.9rem;
+            border: 1px solid rgba(20, 20, 20, 0.11);
+            border-radius: 12px;
+            background: #fff;
+            padding: 0.85rem 0.95rem;
+        }
+
+        .ats-benchmark-hint h4 {
+            margin: 0 0 0.6rem;
+            font-size: 0.86rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .ats-benchmark-list {
+            display: grid;
+            gap: 0.5rem;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .ats-benchmark-band {
+            display: flex;
+            gap: 0.55rem;
+            align-items: flex-start;
+            border-radius: 10px;
+            padding: 0.55rem 0.6rem;
+            border: 1px solid rgba(20, 20, 20, 0.08);
+        }
+
+        .ats-benchmark-band strong {
+            min-width: 88px;
+            font-size: 0.82rem;
+            letter-spacing: 0.02em;
+        }
+
+        .ats-benchmark-band span {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .ats-benchmark-band.bad {
+            background: #fdeeee;
+            border-color: rgba(155, 31, 31, 0.2);
+        }
+
+        .ats-benchmark-band.warn {
+            background: #fff6e8;
+            border-color: rgba(143, 84, 0, 0.22);
+        }
+
+        .ats-benchmark-band.good {
+            background: #eaf8f1;
+            border-color: rgba(14, 107, 63, 0.24);
+        }
+
         @media (max-width: 1024px) {
             .page-layout {
                 grid-template-columns: 1fr;
@@ -548,6 +711,20 @@
 </head>
 <body>
 
+<nav>
+    <ul>
+        <li class="brand"><a href="{% url 'index' %}">ResumeGen</a></li>
+        {% if user.is_authenticated %}
+            <li><a href="{% url 'profile' %}">Welcome, {{ user.username }}</a></li>
+            <li><a href="{% url 'profile' %}">Profile</a></li>
+            <li><a href="{% url 'logout' %}" class="btn-nav">Logout</a></li>
+        {% else %}
+            <li><a href="{% url 'login' %}">Login</a></li>
+            <li><a href="{% url 'register' %}" class="btn-nav">Register</a></li>
+        {% endif %}
+    </ul>
+</nav>
+
 <div class="container">
     <section class="hero">
         <div class="eyebrow">ATS Optimized Resume Workflow</div>
@@ -564,7 +741,8 @@
         </div>
 
         <input type="hidden" name="mode" id="form-mode" value="scratch">
-        <div class="page-layout">
+        <input type="hidden" name="ats_source_hash" id="ats-source-hash" value="">
+        <div class="page-layout" id="builder-layout">
             <div class="stack">
                 <div id="mode-scratch-container" class="stack">
                     <div class="section-block">
@@ -583,48 +761,151 @@
 
                         <div class="form-group mt-md">
                             <label for="summary">Professional Summary</label>
-                            <textarea id="summary" name="summary" rows="4" placeholder="Write a concise summary that highlights your experience, strengths, and target role." class="scratch-req"></textarea>
+                            <textarea id="summary" name="summary" rows="4" placeholder="Write a concise summary that highlights your target role, key strengths, and career goals." class="scratch-req"></textarea>
                         </div>
                     </div>
 
                     <div class="section-block">
                         <h2>Work Experience</h2>
                         <p class="section-subtitle">Use strong action verbs and one accomplishment per line.</p>
-                        <div class="dynamic-list" id="experience-list">
-                            <div class="list-item">
-                                <div class="grid-2">
-                                    <div class="form-group"><label>Title</label><input type="text" name="exp_title[]" class="scratch-req" placeholder="Senior Software Engineer"></div>
-                                    <div class="form-group"><label>Company</label><input type="text" name="exp_company[]" class="scratch-req" placeholder="Google"></div>
-                                    <div class="form-group"><label>Location</label><input type="text" name="exp_location[]" class="scratch-req" placeholder="Mountain View, CA"></div>
-                                    <div class="form-group"><label>Dates</label><input type="text" name="exp_dates[]" class="scratch-req" placeholder="Jan 2020 - Present"></div>
-                                </div>
-                                <div class="form-group mt-md">
-                                    <label>Responsibilities & Bullets</label>
-                                    <textarea name="exp_bullets[]" rows="4" placeholder="Describe responsibilities and impact. Use one bullet per line."></textarea>
+                        
+                        <div class="form-group" style="margin-bottom: 1rem;">
+                            <label for="experience-path-select">Experience Path</label>
+                            <select id="experience-path-select" name="no_work_experience">
+                                <option value="no" selected>I have work experience</option>
+                                <option value="yes">I do not have work experience</option>
+                            </select>
+                        </div>
+
+                        <div id="work-experience-container">
+                            <div class="dynamic-list" id="experience-list">
+                                <div class="list-item">
+                                    <div class="grid-2">
+                                        <div class="form-group"><label>Title</label><input type="text" name="exp_title[]" placeholder="Senior Software Engineer"></div>
+                                        <div class="form-group"><label>Company</label><input type="text" name="exp_company[]" placeholder="Google"></div>
+                                        <div class="form-group"><label>Location</label><input type="text" name="exp_location[]" placeholder="Mountain View, CA"></div>
+                                        <div class="form-group"><label>Dates</label><input type="text" name="exp_dates[]" placeholder="Jan 2020 - Present"></div>
+                                    </div>
+                                    <div class="form-group mt-md">
+                                        <label>Responsibilities & Bullets</label>
+                                        <textarea name="exp_bullets[]" rows="4" placeholder="Describe responsibilities and impact. Use one bullet per line."></textarea>
+                                    </div>
                                 </div>
                             </div>
+                            <button type="button" class="btn btn-outline" id="add-experience">Add Another Experience</button>
                         </div>
-                        <button type="button" class="btn btn-outline" id="add-experience">Add Another Experience</button>
+
+                        <div id="no-experience-guidance" class="hidden-panel" style="margin-top: 1rem; padding: 1rem; background: #faf9f6; border: 1px solid var(--border-color); border-radius: 12px;">
+                            <p style="margin: 0 0 0.7rem; color: var(--text-muted); font-size: 0.95rem;">
+                                <strong>No problem.</strong> This text box is your primary input for experience when you do not have formal jobs.
+                            </p>
+                            <div class="form-group" style="margin-bottom: 0;">
+                                <label for="alternative_experience_text">Relevant Experience Details</label>
+                                <textarea
+                                    id="alternative_experience_text"
+                                    name="alternative_experience_text"
+                                    rows="5"
+                                    placeholder="Example: Built a task-tracking web app in a senior project; volunteered 6 months at local food bank coordinating 20+ weekly donations; completed Google Data Analytics certificate."
+                                ></textarea>
+                            </div>
+                            <p class="source-truth-note"><strong>Also used:</strong> Projects, Volunteer Experience, Certifications, Education, and Skills below are still included as supporting data.</p>
+                        </div>
                     </div>
 
                     <div class="section-block">
                         <h2>Education</h2>
-                        <p class="section-subtitle">Keep the most relevant degree or certification details visible.</p>
+                        <p class="section-subtitle">Include any education path: GED, high school diploma, degree, bootcamp, certification, or coursework.</p>
                         <div class="dynamic-list" id="education-list">
                             <div class="list-item">
                                 <div class="grid-2">
-                                    <div class="form-group"><label>Institution</label><input type="text" name="edu_inst[]" class="scratch-req" placeholder="University of California, Berkeley"></div>
-                                    <div class="form-group"><label>Degree</label><input type="text" name="edu_deg[]" class="scratch-req" placeholder="B.S. Computer Science"></div>
+                                    <div class="form-group"><label>School / Program / Provider</label><input type="text" name="edu_inst[]" class="scratch-req" placeholder="State Adult School, Coursera, UC Berkeley"></div>
+                                    <div class="form-group">
+                                        <label>Education Type</label>
+                                        <select name="edu_credential_type[]" class="scratch-req">
+                                            <option value="" selected>Select type</option>
+                                            <option value="GED">GED (High School Equivalency)</option>
+                                            <option value="High School">High School</option>
+                                            <option value="High School Diploma">High School Diploma</option>
+                                            <option value="Associate Degree">Associate Degree</option>
+                                            <option value="Bachelor's Degree">Bachelor's Degree</option>
+                                            <option value="Master's Degree">Master's Degree</option>
+                                            <option value="Doctorate">Doctorate</option>
+                                            <option value="Bootcamp">Bootcamp</option>
+                                            <option value="Certification">Certification</option>
+                                            <option value="Coursework">Coursework</option>
+                                            <option value="Other">Other</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group"><label>Program / Major / Certificate Name (optional)</label><input type="text" name="edu_deg[]" placeholder="B.S. Computer Science, Data Analytics Certificate"></div>
                                     <div class="form-group"><label>Location</label><input type="text" name="edu_loc[]" class="scratch-req" placeholder="Berkeley, CA"></div>
                                     <div class="form-group"><label>Dates</label><input type="text" name="edu_dates[]" placeholder="2016 - 2020"></div>
                                 </div>
                                 <div class="form-group mt-md">
                                     <label>Details</label>
-                                    <textarea name="edu_details[]" rows="2" placeholder="Honors, GPA, thesis, societies"></textarea>
+                                    <textarea name="edu_details[]" rows="2" placeholder="Relevant coursework, honors, GPA, capstone, certifications, achievements"></textarea>
                                 </div>
                             </div>
                         </div>
                         <button type="button" class="btn btn-outline" id="add-education">Add Another Education</button>
+                    </div>
+
+                    <div class="section-block">
+                        <h2>Projects</h2>
+                        <p class="section-subtitle">Add school projects, capstones, hackathons, or personal projects.</p>
+                        <div class="dynamic-list" id="projects-list">
+                            <div class="list-item">
+                                <div class="grid-2">
+                                    <div class="form-group"><label>Project Name</label><input type="text" name="project_name[]" placeholder="Task Tracker App"></div>
+                                    <div class="form-group"><label>Organization / School</label><input type="text" name="project_org[]" placeholder="State University"></div>
+                                    <div class="form-group"><label>Location</label><input type="text" name="project_loc[]" placeholder="Remote"></div>
+                                    <div class="form-group"><label>Dates</label><input type="text" name="project_dates[]" placeholder="2025"></div>
+                                </div>
+                                <div class="form-group mt-md">
+                                    <label>Bullets</label>
+                                    <textarea name="project_bullets[]" rows="3" placeholder="Built the app, used Python and Django, deployed to Render."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline" id="add-project">Add Another Project</button>
+                    </div>
+
+                    <div class="section-block">
+                        <h2>Volunteer Experience</h2>
+                        <p class="section-subtitle">Add volunteer work, leadership, clubs, or community service.</p>
+                        <div class="dynamic-list" id="volunteer-list">
+                            <div class="list-item">
+                                <div class="grid-2">
+                                    <div class="form-group"><label>Role</label><input type="text" name="volunteer_role[]" placeholder="Volunteer Tutor"></div>
+                                    <div class="form-group"><label>Organization</label><input type="text" name="volunteer_org[]" placeholder="Local Library"></div>
+                                    <div class="form-group"><label>Location</label><input type="text" name="volunteer_loc[]" placeholder="City, State"></div>
+                                    <div class="form-group"><label>Dates</label><input type="text" name="volunteer_dates[]" placeholder="2024 - Present"></div>
+                                </div>
+                                <div class="form-group mt-md">
+                                    <label>Bullets</label>
+                                    <textarea name="volunteer_bullets[]" rows="3" placeholder="Tutored students weekly, organized materials, improved attendance."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline" id="add-volunteer">Add Another Volunteer Entry</button>
+                    </div>
+
+                    <div class="section-block">
+                        <h2>Certifications</h2>
+                        <p class="section-subtitle">Add certifications, licenses, or completed bootcamps.</p>
+                        <div class="dynamic-list" id="certifications-list">
+                            <div class="list-item">
+                                <div class="grid-2">
+                                    <div class="form-group"><label>Certification Name</label><input type="text" name="cert_name[]" placeholder="Google Data Analytics Certificate"></div>
+                                    <div class="form-group"><label>Issuer</label><input type="text" name="cert_issuer[]" placeholder="Google"></div>
+                                    <div class="form-group"><label>Dates</label><input type="text" name="cert_dates[]" placeholder="2025"></div>
+                                </div>
+                                <div class="form-group mt-md">
+                                    <label>Details</label>
+                                    <textarea name="cert_details[]" rows="2" placeholder="Completed SQL, spreadsheets, and data visualization coursework."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-outline" id="add-certification">Add Another Certification</button>
                     </div>
                 </div>
 
@@ -693,6 +974,23 @@
                         <label for="job_description">Job Description (For ATS Check)</label>
                         <textarea id="job_description" name="job_description" rows="3" placeholder="Paste the job description here..."></textarea>
                     </div>
+                    <div class="ats-benchmark-hint" aria-label="ATS benchmark guidance">
+                        <h4>Key ATS Benchmarks</h4>
+                        <ul class="ats-benchmark-list">
+                            <li class="ats-benchmark-band bad">
+                                <strong>&lt; 60%</strong>
+                                <span>Risky: Major gaps; likely filtered out before a human sees it.</span>
+                            </li>
+                            <li class="ats-benchmark-band warn">
+                                <strong>60-79%</strong>
+                                <span>Decent: Good start, but missing key skills or context.</span>
+                            </li>
+                            <li class="ats-benchmark-band good">
+                                <strong>80%+</strong>
+                                <span>Strong: Highly aligned; strongly likely to pass.</span>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
 
                 <div class="sidebar-card">
@@ -732,6 +1030,9 @@
         <div id="ats-results-container" class="section-block mt-md hidden-panel" style="margin-bottom: 2rem;">
             <h2>ATS Verification Results</h2>
             <div id="ats-results-content">Loading...</div>
+            <div style="margin-top: 1rem; display: flex; justify-content: flex-end;">
+                <button type="button" id="apply-ats-fixes-btn" class="btn hidden-panel">Fix Resume Using ATS Suggestions</button>
+            </div>
         </div>
     </form>
 </div>
@@ -743,37 +1044,134 @@
     const tabScratch = document.getElementById('tab-scratch');
     const panelRevise = document.getElementById('mode-revise-container');
     const panelScratch = document.getElementById('mode-scratch-container');
+    const builderLayout = document.getElementById('builder-layout');
     const formMode = document.getElementById('form-mode');
     const uploadInput = document.getElementById('resume_upload');
     const scratchReqs = document.querySelectorAll('.scratch-req');
     const submitBtn = document.getElementById('submit-btn');
     const scratchSkillsCard = document.getElementById('scratch-skills-card');
+    let isModeAnimating = false;
 
-    function setMode(mode) {
+    function prefersReducedMotion() {
+        return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+
+    function animatePanelSwitch(outgoingPanel, incomingPanel, animate) {
+        if (!animate || prefersReducedMotion() || outgoingPanel === incomingPanel) {
+            outgoingPanel.style.display = 'none';
+            incomingPanel.style.display = 'block';
+            return Promise.resolve();
+        }
+
+        incomingPanel.style.display = 'block';
+        incomingPanel.style.opacity = '0';
+        incomingPanel.style.transform = 'translateY(10px)';
+
+        const outAnim = outgoingPanel.animate(
+            [
+                { opacity: 1, transform: 'translateY(0)' },
+                { opacity: 0, transform: 'translateY(-8px)' },
+            ],
+            {
+                duration: 160,
+                easing: 'ease-out',
+                fill: 'forwards',
+            }
+        );
+
+        const inAnim = incomingPanel.animate(
+            [
+                { opacity: 0, transform: 'translateY(10px)' },
+                { opacity: 1, transform: 'translateY(0)' },
+            ],
+            {
+                duration: 220,
+                easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                fill: 'forwards',
+            }
+        );
+
+        return Promise.all([
+            outAnim.finished.catch(() => {}),
+            inAnim.finished.catch(() => {}),
+        ]).then(() => {
+            outgoingPanel.style.display = 'none';
+            outgoingPanel.style.opacity = '';
+            outgoingPanel.style.transform = '';
+            incomingPanel.style.opacity = '';
+            incomingPanel.style.transform = '';
+        });
+    }
+
+    function setScratchCardVisibility(shouldShow, animate) {
+        if (!animate || prefersReducedMotion()) {
+            scratchSkillsCard.style.display = shouldShow ? 'block' : 'none';
+            return;
+        }
+
+        if (shouldShow) {
+            scratchSkillsCard.style.display = 'block';
+            scratchSkillsCard.animate(
+                [
+                    { opacity: 0, transform: 'translateY(8px)' },
+                    { opacity: 1, transform: 'translateY(0)' },
+                ],
+                { duration: 180, easing: 'ease-out' }
+            );
+            return;
+        }
+
+        const hideAnim = scratchSkillsCard.animate(
+            [
+                { opacity: 1, transform: 'translateY(0)' },
+                { opacity: 0, transform: 'translateY(-6px)' },
+            ],
+            { duration: 130, easing: 'ease-in' }
+        );
+
+        hideAnim.finished
+            .then(() => {
+                scratchSkillsCard.style.display = 'none';
+                scratchSkillsCard.style.opacity = '';
+                scratchSkillsCard.style.transform = '';
+            })
+            .catch(() => {
+                scratchSkillsCard.style.display = 'none';
+            });
+    }
+
+    function setMode(mode, { animate = true } = {}) {
+        if (isModeAnimating) {
+            return;
+        }
+        isModeAnimating = true;
+
         formMode.value = mode;
         if (mode === 'revise') {
+            builderLayout.classList.add('is-revise');
             tabRevise.classList.add('is-active');
             tabScratch.classList.remove('is-active');
-
-            panelRevise.style.display = 'block';
-            panelScratch.style.display = 'none';
-            scratchSkillsCard.style.display = 'none';
+            setScratchCardVisibility(false, animate);
 
             uploadInput.required = true;
             scratchReqs.forEach(el => el.required = false);
             submitBtn.textContent = 'Revise & Generate Documents';
+            animatePanelSwitch(panelScratch, panelRevise, animate).finally(() => {
+                isModeAnimating = false;
+            });
 
         } else {
+            builderLayout.classList.remove('is-revise');
             tabScratch.classList.add('is-active');
             tabRevise.classList.remove('is-active');
-
-            panelScratch.style.display = 'block';
-            panelRevise.style.display = 'none';
-            scratchSkillsCard.style.display = 'block';
+            setScratchCardVisibility(true, animate);
 
             uploadInput.required = false;
             scratchReqs.forEach(el => el.required = true);
             submitBtn.textContent = 'Build & Generate Documents';
+            animatePanelSwitch(panelRevise, panelScratch, animate).finally(() => {
+                isModeAnimating = false;
+            });
         }
     }
 
@@ -781,7 +1179,7 @@
     tabScratch.addEventListener('click', () => setMode('scratch'));
 
     // Initialize default mode
-    setMode('scratch');
+    setMode('scratch', { animate: false });
 
     // Revise Source Toggling
     const sourceUpload = document.getElementById('source-upload');
@@ -811,19 +1209,159 @@
     sourceGdrive.addEventListener('click', () => setSource('gdrive'));
 
     // JavaScript for adding dynamic DOM items
+    const experienceList = document.getElementById('experience-list');
+    const experiencePathSelect = document.getElementById('experience-path-select');
+    const workExperienceContainer = document.getElementById('work-experience-container');
+    const noExperienceGuidance = document.getElementById('no-experience-guidance');
+    const alternativeExperienceText = document.getElementById('alternative_experience_text');
+
+    function clearItemFields(item) {
+        item.querySelectorAll('input, textarea, select').forEach((el) => {
+            if (el.type === 'checkbox' || el.type === 'radio') {
+                el.checked = false;
+            } else if (el.tagName === 'SELECT') {
+                el.selectedIndex = 0;
+            } else {
+                el.value = '';
+            }
+        });
+    }
+
+    function syncListDeleteButtons(listElement) {
+        const items = Array.from(listElement.querySelectorAll('.list-item'));
+        const canRemoveExtras = items.length > 1;
+
+        items.forEach((item, index) => {
+            const existingBtn = item.querySelector('.remove-item-btn');
+            if (existingBtn) {
+                existingBtn.remove();
+            }
+
+            if (!canRemoveExtras || index === 0) {
+                return;
+            }
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'remove-item-btn';
+            removeBtn.textContent = 'Delete';
+            removeBtn.addEventListener('click', () => {
+                const shouldDelete = window.confirm('Delete this entry? This cannot be undone.');
+                if (!shouldDelete) {
+                    return;
+                }
+                item.remove();
+                syncListDeleteButtons(listElement);
+                updateWorkExperienceValidation();
+            });
+
+            item.appendChild(removeBtn);
+        });
+    }
+
+    // Set initial required attributes on work experience.
+    const firstExpItem = experienceList.querySelector('.list-item');
+    if (firstExpItem) {
+        firstExpItem.querySelector('input[name="exp_title[]"]').setAttribute('required', 'required');
+        firstExpItem.querySelector('input[name="exp_company[]"]').setAttribute('required', 'required');
+    }
+
     document.getElementById('add-experience').addEventListener('click', function() {
-        const list = document.getElementById('experience-list');
-        const item = list.querySelector('.list-item').cloneNode(true);
-        item.querySelectorAll('input, textarea').forEach(el => el.value = '');
-        list.appendChild(item);
+        const item = experienceList.querySelector('.list-item').cloneNode(true);
+        item.querySelectorAll('input, textarea, select').forEach(el => {
+            el.value = '';
+            el.removeAttribute('required');
+            if (el.tagName === 'SELECT') {
+                el.selectedIndex = 0;
+            }
+        });
+        experienceList.appendChild(item);
+        syncListDeleteButtons(experienceList);
+        updateWorkExperienceValidation();
     });
+
+    function updateWorkExperienceValidation() {
+        const expInputs = experienceList.querySelectorAll('input[name="exp_title[]"], input[name="exp_company[]"]');
+        if (experiencePathSelect.value === 'yes') {
+            expInputs.forEach(input => input.removeAttribute('required'));
+            alternativeExperienceText.setAttribute('required', 'required');
+        } else {
+            alternativeExperienceText.removeAttribute('required');
+            // First item's title and company should be required if not skipping work experience
+            const firstItem = experienceList.querySelector('.list-item');
+            if (firstItem) {
+                firstItem.querySelector('input[name="exp_title[]"]').setAttribute('required', 'required');
+                firstItem.querySelector('input[name="exp_company[]"]').setAttribute('required', 'required');
+            }
+        }
+    }
+
+    function syncExperiencePathUI() {
+        if (experiencePathSelect.value === 'yes') {
+            workExperienceContainer.style.display = 'none';
+            noExperienceGuidance.style.display = 'block';
+        } else {
+            workExperienceContainer.style.display = 'block';
+            noExperienceGuidance.style.display = 'none';
+        }
+        updateWorkExperienceValidation();
+    }
+
+    experiencePathSelect.addEventListener('change', syncExperiencePathUI);
+    syncExperiencePathUI();
 
     document.getElementById('add-education').addEventListener('click', function() {
         const list = document.getElementById('education-list');
         const item = list.querySelector('.list-item').cloneNode(true);
         item.querySelectorAll('input, textarea').forEach(el => el.value = '');
         list.appendChild(item);
+        syncListDeleteButtons(list);
     });
+
+    document.getElementById('add-project').addEventListener('click', function() {
+        const list = document.getElementById('projects-list');
+        const item = list.querySelector('.list-item').cloneNode(true);
+        item.querySelectorAll('input, textarea, select').forEach(el => {
+            el.value = '';
+            if (el.tagName === 'SELECT') {
+                el.selectedIndex = 0;
+            }
+        });
+        list.appendChild(item);
+        syncListDeleteButtons(list);
+    });
+
+    document.getElementById('add-volunteer').addEventListener('click', function() {
+        const list = document.getElementById('volunteer-list');
+        const item = list.querySelector('.list-item').cloneNode(true);
+        item.querySelectorAll('input, textarea, select').forEach(el => {
+            el.value = '';
+            if (el.tagName === 'SELECT') {
+                el.selectedIndex = 0;
+            }
+        });
+        list.appendChild(item);
+        syncListDeleteButtons(list);
+    });
+
+    document.getElementById('add-certification').addEventListener('click', function() {
+        const list = document.getElementById('certifications-list');
+        const item = list.querySelector('.list-item').cloneNode(true);
+        item.querySelectorAll('input, textarea, select').forEach(el => {
+            el.value = '';
+            if (el.tagName === 'SELECT') {
+                el.selectedIndex = 0;
+            }
+        });
+        list.appendChild(item);
+        syncListDeleteButtons(list);
+    });
+
+    syncListDeleteButtons(experienceList);
+    syncListDeleteButtons(document.getElementById('education-list'));
+    syncListDeleteButtons(document.getElementById('projects-list'));
+    syncListDeleteButtons(document.getElementById('volunteer-list'));
+    syncListDeleteButtons(document.getElementById('certifications-list'));
 
     // --- Google Drive 2026 Picker API ---
     // According to Google's 2025/2026 GIS guidelines for 3rd-party cookie phaseout
@@ -915,7 +1453,50 @@
     const atsRunState = document.getElementById('ats-run-state');
     const atsResultsContainer = document.getElementById('ats-results-container');
     const atsResultsContent = document.getElementById('ats-results-content');
+    const applyAtsFixesBtn = document.getElementById('apply-ats-fixes-btn');
+    const atsSourceHashInput = document.getElementById('ats-source-hash');
+    const revisionNotesInput = document.getElementById('revision_notes');
+    const resumeForm = document.getElementById('resume-form');
     let activeAtsPoll = null;
+    let latestAtsResult = null;
+
+    function buildAtsRevisionNotes(result) {
+        const missingKeywords = Array.isArray(result.missing_keywords) ? result.missing_keywords : [];
+        const formattingFeedback = Array.isArray(result.formatting_feedback) ? result.formatting_feedback : [];
+        const contentFeedback = Array.isArray(result.content_feedback) ? result.content_feedback : [];
+        const recommendation = String(result.overall_recommendation || '').trim();
+
+        const lines = [
+            'Revise this resume using the ATS feedback below while preserving truthful facts and dates.',
+            'Focus on stronger alignment with the target role and job description.',
+            '',
+        ];
+
+        if (recommendation) {
+            lines.push(`Overall recommendation: ${recommendation}`, '');
+        }
+
+        if (missingKeywords.length > 0) {
+            lines.push('Add or strengthen these keywords where accurate:');
+            missingKeywords.forEach((keyword) => lines.push(`- ${keyword}`));
+            lines.push('');
+        }
+
+        if (contentFeedback.length > 0) {
+            lines.push('Content improvements to apply:');
+            contentFeedback.forEach((item) => lines.push(`- ${item}`));
+            lines.push('');
+        }
+
+        if (formattingFeedback.length > 0) {
+            lines.push('Formatting fixes to apply:');
+            formattingFeedback.forEach((item) => lines.push(`- ${item}`));
+            lines.push('');
+        }
+
+        lines.push('Do not fabricate employers, dates, credentials, or metrics.');
+        return lines.join('\n').trim();
+    }
 
     function escapeHtml(value) {
         return String(value ?? '')
@@ -935,6 +1516,8 @@
     }
 
     function renderAtsError(message) {
+        latestAtsResult = null;
+        applyAtsFixesBtn.classList.add('hidden-panel');
         atsResultsContent.innerHTML = `<div class="ats-error">${escapeHtml(message)}</div>`;
     }
 
@@ -947,6 +1530,9 @@
             clearInterval(activeAtsPoll);
             activeAtsPoll = null;
         }
+
+        latestAtsResult = null;
+        applyAtsFixesBtn.classList.add('hidden-panel');
 
         verifyAtsBtn.disabled = true;
         verifyAtsBtn.classList.add('is-loading');
@@ -979,6 +1565,10 @@
                  renderAtsError('Error: Failed to initiate background job.');
                  setAtsState('ATS failed', 'error');
                  return;
+            }
+
+            if (data.resume_hash) {
+                atsSourceHashInput.value = data.resume_hash;
             }
 
             let attempts = 0;
@@ -1021,9 +1611,11 @@
                         clearInterval(activeAtsPoll);
                         activeAtsPoll = null;
                         const result = statusData.result;
+                        latestAtsResult = result;
 
                         const score = Number(result.ats_score || 0);
-                        const scoreClass = score > 75 ? 'good' : (score > 50 ? 'warn' : 'bad');
+                        const scoreClass = score >= 80 ? 'good' : (score >= 60 ? 'warn' : 'bad');
+                        const benchmarkLabel = score >= 80 ? 'Strong (80%+)' : (score >= 60 ? 'Decent (60-79%)' : 'Risky (<60%)');
                         const missingKeywords = Array.isArray(result.missing_keywords) ? result.missing_keywords : [];
                         const formattingFeedback = Array.isArray(result.formatting_feedback) ? result.formatting_feedback : [];
                         const contentFeedback = Array.isArray(result.content_feedback) ? result.content_feedback : [];
@@ -1036,6 +1628,7 @@
                             <div class="ats-top-row">
                                 <h3 class="ats-score ${scoreClass}">${escapeHtml(score)}/100</h3>
                                 <div class="ats-meta"><strong>Match Rate:</strong> ${keywordRate}</div>
+                                <div class="ats-meta"><strong>Benchmark:</strong> ${escapeHtml(benchmarkLabel)}</div>
                             </div>
                             <div class="ats-block">
                                 <h4>Overall Recommendation</h4>
@@ -1056,6 +1649,7 @@
                         }
                         
                         atsResultsContent.innerHTML = html;
+                        applyAtsFixesBtn.classList.remove('hidden-panel');
                         setAtsState('ATS complete', 'success');
                     }
                 } catch (pollErr) {
@@ -1074,6 +1668,20 @@
             verifyAtsBtn.classList.remove('is-loading');
             verifyAtsBtn.textContent = 'Check ATS Score';
         }
+    });
+
+    applyAtsFixesBtn.addEventListener('click', function() {
+        if (!latestAtsResult) {
+            alert('Run ATS check first so suggestions are available.');
+            return;
+        }
+
+        const generatedNotes = buildAtsRevisionNotes(latestAtsResult);
+        const existingNotes = (revisionNotesInput.value || '').trim();
+        revisionNotesInput.value = existingNotes ? `${existingNotes}\n\n${generatedNotes}` : generatedNotes;
+
+        formMode.value = 'ats_fix';
+        resumeForm.submit();
     });
 
 </script>

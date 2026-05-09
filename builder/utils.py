@@ -28,12 +28,17 @@ def run_resume_workflow(raw_data: dict, options: dict) -> ResumeWorkflowResult:
         api_key=require_api_key(),
         revision_notes=options.get("revision_notes", ""),
         resume_text=options.get("gdrive_text", ""),
+        current_resume=options.get("cached_resume"),
         target_role=options.get("target_role", ""),
         target_company=options.get("target_company", ""),
         job_description=options.get("job_description", ""),
     )
 
-    if options.get("cached_resume"):
+    if options.get("mode") == "ats_fix":
+        if not options.get("cached_resume"):
+            raise RuntimeError("ATS fix requires a cached ATS baseline resume.")
+        result = workflow.revise(payload)
+    elif options.get("cached_resume"):
         result = ResumeWorkflowResult(
             raw_data=payload.raw_data,
             resume=options["cached_resume"],

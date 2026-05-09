@@ -14,8 +14,15 @@ from django.http import HttpResponse, JsonResponse, FileResponse
 from django.conf import settings
 from django.core.cache import cache
 from django.core.files.uploadedfile import UploadedFile
+from django.core.files.base import ContentFile
 from django.core.exceptions import SuspiciousOperation
 from django.urls import reverse
+from django.contrib.auth import login, authenticate, logout
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.decorators import login_required
+from .models import Profile, Resume, CoverLetter
+from django.contrib.auth.models import User
+from django.contrib import messages
 
 # Type Imports
 from dataclasses import dataclass
@@ -181,6 +188,11 @@ def cleanup_session_upload_file(request) -> None:
             logger.warning("Failed to remove temporary upload file: %s", path)
 
 def parse_resume_form(request):
+    # Check if user indicated no work experience
+    no_work_experience_value = (request.POST.get('no_work_experience') or '').strip().lower()
+    no_work_experience = no_work_experience_value in {'on', 'yes', 'true', '1'}
+    alternative_experience_text = request.POST.get('alternative_experience_text', '').strip()
+    
     # Safely extract dynamic lists
     titles = request.POST.getlist('exp_title[]')
     companies = request.POST.getlist('exp_company[]')
@@ -189,32 +201,101 @@ def parse_resume_form(request):
     bullets = request.POST.getlist('exp_bullets[]')
     
     work_experience = []
-    for t, c, l, d, b in zip(titles, companies, locs, dates, bullets):
-        if t or c:
-            bullet_lines = [line.strip() for line in b.split('\n') if line.strip()]
-            work_experience.append({
-                "title": t,
-                "company": c,
-                "location": l,
-                "dates": d,
-                "bullets": bullet_lines
-            })
+    # Only process work experience if user didn't indicate they have none
+    if not no_work_experience:
+        for t, c, l, d, b in zip(titles, companies, locs, dates, bullets):
+            if t or c:
+                bullet_lines = [line.strip() for line in b.split('\n') if line.strip()]
+                work_experience.append({
+                    "title": t,
+                    "company": c,
+                    "location": l,
+                    "dates": d,
+                    "bullets": bullet_lines
+                })
             
     edu_insts = request.POST.getlist('edu_inst[]')
+    edu_credential_types = request.POST.getlist('edu_credential_type[]')
     edu_degs = request.POST.getlist('edu_deg[]')
     edu_locs = request.POST.getlist('edu_loc[]')
     edu_dates = request.POST.getlist('edu_dates[]')
     edu_details = request.POST.getlist('edu_details[]')
+
+    if not edu_credential_types:
+        edu_credential_types = [""] * len(edu_degs)
     
     education = []
-    for ei, ed, el, edd, edit in zip(edu_insts, edu_degs, edu_locs, edu_dates, edu_details):
-        if ei or ed:
+    for ei, et, ed, el, edd, edit in zip(edu_insts, edu_credential_types, edu_degs, edu_locs, edu_dates, edu_details):
+        et = (et or "").strip()
+        ed = (ed or "").strip()
+        extra_details = (edit or "").strip()
+
+        if et in {"GED", "GED (High School Equivalency)", "High School", "High School Diploma"}:
+            normalized_degree = et
+            if ed:
+                extra_details = f"Program details: {ed}" if not extra_details else f"Program details: {ed}; {extra_details}"
+        elif et and ed:
+            normalized_degree = ed
+            extra_details = f"Education type: {et}" if not extra_details else f"Education type: {et}; {extra_details}"
+        else:
+            normalized_degree = et or ed
+
+        if ei or et or ed:
             education.append({
                 "institution": ei,
-                "degree": ed,
+                "degree": normalized_degree,
                 "location": el,
                 "dates": edd,
-                "details": edit
+                "details": extra_details
+            })
+
+    project_names = request.POST.getlist('project_name[]')
+    project_orgs = request.POST.getlist('project_org[]')
+    project_locs = request.POST.getlist('project_loc[]')
+    project_dates = request.POST.getlist('project_dates[]')
+    project_bullets = request.POST.getlist('project_bullets[]')
+
+    projects = []
+    for name, org, loc, dates_value, bullets_value in zip(project_names, project_orgs, project_locs, project_dates, project_bullets):
+        if name:
+            projects.append({
+                "name": name,
+                "organization": org,
+                "location": loc,
+                "dates": dates_value,
+                "bullets": [line.strip() for line in bullets_value.split('\n') if line.strip()],
+            })
+
+    volunteer_roles = request.POST.getlist('volunteer_role[]')
+    volunteer_orgs = request.POST.getlist('volunteer_org[]')
+    volunteer_locs = request.POST.getlist('volunteer_loc[]')
+    volunteer_dates = request.POST.getlist('volunteer_dates[]')
+    volunteer_bullets = request.POST.getlist('volunteer_bullets[]')
+
+    volunteer_experience = []
+    for role, org, loc, dates_value, bullets_value in zip(volunteer_roles, volunteer_orgs, volunteer_locs, volunteer_dates, volunteer_bullets):
+        if role or org:
+            volunteer_experience.append({
+                "role": role,
+                "organization": org,
+                "location": loc,
+                "dates": dates_value,
+                "bullets": [line.strip() for line in bullets_value.split('\n') if line.strip()],
+            })
+
+    cert_names = request.POST.getlist('cert_name[]')
+    cert_issuers = request.POST.getlist('cert_issuer[]')
+    cert_dates = request.POST.getlist('cert_dates[]')
+    cert_details = request.POST.getlist('cert_details[]')
+
+    certifications = []
+    for name, issuer, dates_value, details in zip(cert_names, cert_issuers, cert_dates, cert_details):
+        if name:
+            certifications.append({
+                "name": name,
+                "issuer": issuer,
+                "dates": dates_value,
+                "details": details,
             })
     
     skills_raw = request.POST.get('skills', '')
@@ -224,7 +305,12 @@ def parse_resume_form(request):
         "full_name": request.POST.get('full_name', ''),
         "contact_info": request.POST.get('contact_info', ''),
         "summary": request.POST.get('summary', ''),
+        "no_work_experience": no_work_experience,
+        "alternative_experience_text": alternative_experience_text,
         "work_experience": work_experience,
+        "projects": projects,
+        "volunteer_experience": volunteer_experience,
+        "certifications": certifications,
         "education": education,
         "skills": skills_list
     }
@@ -289,6 +375,21 @@ def generate(request):
 
         resume_hash = compute_resume_cache_hash(raw_data, options, file_hash_content)
 
+        if options.get("mode") == "ats_fix":
+            source_hash = (request.POST.get("ats_source_hash") or "").strip() or request.session.get("last_resume_hash")
+            source_cached_data = cache.get(source_hash) if source_hash else None
+            if source_cached_data:
+                options['cached_resume'] = source_cached_data.get('cached_resume')
+                options['cached_cover_letter'] = source_cached_data.get('cached_cover_letter')
+                options['cached_raw_data'] = source_cached_data.get('cached_raw_data')
+            else:
+                return safe_error_response(
+                    request,
+                    log_message="ATS fix requested without cached ATS baseline resume.",
+                    user_message="Run ATS check first, then click Fix Resume Using ATS Suggestions.",
+                    status=400,
+                )
+
         if request.session.get('last_resume_hash') == resume_hash:
             cached_data = cache.get(resume_hash)
             if cached_data:
@@ -307,6 +408,26 @@ def generate(request):
                 'cached_raw_data': out_raw_data,
             }, timeout=3600)  # 1 hour
             request.session['last_resume_hash'] = resume_hash
+
+            # Save to database if user is logged in
+            if request.user.is_authenticated:
+                resume_file = ContentFile(file_stream.getvalue())
+                Resume.objects.create(
+                    user=request.user,
+                    title=filename,
+                    file=resume_file,
+                    hash=resume_hash,
+                    version_type=options.get("mode", "generated")
+                )
+                # If cover letter was also generated, save it
+                if out_cover_letter:
+                    CoverLetter.objects.create(
+                        user=request.user,
+                        title=f"{filename.replace('.pdf', '').replace('.docx', '')} Cover Letter",
+                        content=json.dumps(out_cover_letter)
+                    )
+                # Reset stream pointer for response
+                file_stream.seek(0)
             
             if original_format == "gdocs":
                 write_session_upload_file(request, file_stream, filename)
@@ -384,7 +505,7 @@ def verify_ats(request):
 
             job_id = submit_job(run_ats_check)
             request.session['last_resume_hash'] = resume_hash
-            return JsonResponse({"job_id": job_id})
+            return JsonResponse({"job_id": job_id, "resume_hash": resume_hash})
             
         except Exception as exc:
             return safe_error_response(
@@ -553,3 +674,72 @@ def export_google_doc_text(file_id: str, access_token: str) -> tuple[str, str]:
         chunks.append(chunk)
 
     return b"".join(chunks).decode("utf-8", errors="replace"), digest.hexdigest()
+
+
+def get_client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0]
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
+
+
+# User Registration View
+def register(request):
+    if request.method == 'POST':
+        # Simple rate limit for registration
+        ip = get_client_ip(request)
+        reg_key = f"reg_limit_{ip}"
+        count = cache.get(reg_key, 0)
+        if count >= 5:
+            return HttpResponse("Too many registration attempts. Please try again later.", status=429)
+        cache.set(reg_key, count + 1, timeout=3600)
+
+        form = UserCreationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            Profile.objects.create(user=user)  # Create a profile for the user
+            login(request, user)
+            return redirect('profile')
+    else:
+        form = UserCreationForm()
+    return render(request, 'builder/register.html', {'form': form})
+
+# User Login View
+def user_login(request):
+    if request.method == 'POST':
+        # Simple rate limit for login
+        ip = get_client_ip(request)
+        login_key = f"login_limit_{ip}"
+        count = cache.get(login_key, 0)
+        if count >= 10:
+            return HttpResponse("Too many login attempts. Please try again later.", status=429)
+
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            user = form.get_user()
+            login(request, user)
+            cache.delete(login_key) # Reset on success
+            return redirect('profile')
+        else:
+            cache.set(login_key, count + 1, timeout=300)
+            return render(request, 'builder/login.html', {'error': 'Invalid username or password.', 'form': form})
+    else:
+        form = AuthenticationForm()
+    return render(request, 'builder/login.html', {'form': form})
+
+# User Logout View
+def user_logout(request):
+    logout(request)
+    return redirect('login')
+
+# User Profile View
+@login_required
+def profile(request):
+    resumes = Resume.objects.filter(user=request.user).order_by('-created_at')
+    cover_letters = CoverLetter.objects.filter(user=request.user).order_by('-created_at')
+    return render(request, 'builder/profile.html', {
+        'resumes': resumes,
+        'cover_letters': cover_letters,
+    })

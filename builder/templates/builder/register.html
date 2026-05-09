@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register - ResumeGen</title>
+    <style>
+        nav {
+            background: #111111 !important;
+            border-bottom: 1px solid rgba(20, 20, 20, 0.22);
+            padding: 0.85rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 9999;
+            width: 100%;
+        }
+
+        nav ul {
+            list-style: none;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 2rem;
+            margin: 0 auto;
+            padding: 0;
+            max-width: 1220px;
+        }
+
+        nav ul li.brand {
+            margin-right: auto;
+            font-weight: 800;
+            font-size: 1.25rem;
+            letter-spacing: -0.03em;
+            color: #ffffff;
+        }
+
+        nav ul li.brand a {
+            color: #ffffff;
+            text-decoration: none;
+        }
+
+        nav ul li a {
+            text-decoration: none;
+            color: #eeeeee;
+            font-weight: 600;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+        }
+
+        nav ul li a:hover {
+            color: #ffffff;
+            opacity: 0.8;
+        }
+
+        nav ul li a.btn-nav {
+            background: #ffffff;
+            color: #111111;
+            padding: 0.5rem 1.2rem;
+            border-radius: 6px;
+        }
+
+        nav ul li a.btn-nav:hover {
+            background: #f0f0f0;
+            transform: translateY(-1px);
+        }
+
+        :root {
+            --bg-body: #f5f2eb;
+            --bg-surface: #ffffff;
+            --text-main: #141414;
+            --text-muted: #6c6963;
+            --border-color: rgba(20, 20, 20, 0.11);
+            --btn-bg: #111111;
+            --btn-hover: #2b2b2b;
+            --btn-text: #ffffff;
+            --shadow-soft: 0 10px 24px rgba(35, 30, 23, 0.06);
+            --font-body: "Avenir Next", "Segoe UI", sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            font-family: var(--font-body);
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 1220px;
+            margin: 0 auto;
+            padding: 28px 24px 56px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.8rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: var(--btn-bg);
+            color: var(--btn-text);
+        }
+
+        .btn-primary:hover {
+            background: var(--btn-hover);
+        }
+
+        form p {
+            margin-bottom: 1rem;
+        }
+
+        input {
+            width: 100%;
+            padding: 0.8rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <ul>
+        <li class="brand"><a href="{% url 'index' %}">ResumeGen</a></li>
+        {% if user.is_authenticated %}
+            <li><a href="{% url 'profile' %}">Welcome, {{ user.username }}</a></li>
+            <li><a href="{% url 'profile' %}">Profile</a></li>
+            <li><a href="{% url 'logout' %}" class="btn-nav">Logout</a></li>
+        {% else %}
+            <li><a href="{% url 'login' %}">Login</a></li>
+            <li><a href="{% url 'register' %}" class="btn-nav">Register</a></li>
+        {% endif %}
+    </ul>
+</nav>
+
+<div class="container">
+    <div style="max-width: 500px; margin: 2rem auto; background: white; padding: 2.5rem; border-radius: 18px; box-shadow: var(--shadow-soft); border: 1px solid var(--border-color);">
+        <h2>Create an Account</h2>
+        <p style="margin-bottom: 2rem;">Join ResumeGen to manage your resumes and cover letters.</p>
+        <form method="post">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Register</button>
+        </form>
+        <p style="margin-top: 1.5rem; font-size: 0.9rem; text-align: center;">
+            Already have an account? <a href="{% url 'login' %}">Log in here</a>
+        </p>
+    </div>
+</div>
+</body>
+</html>

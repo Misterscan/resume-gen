@@ -49,6 +49,59 @@ class WorkExperience(StrictBaseModel):
         return _clean_text_list(value, max_items=12, max_length=2_000)
 
 
+class ProjectItem(StrictBaseModel):
+    name: str = Field(default="", max_length=300)
+    organization: str = Field(default="", max_length=300)
+    location: str = Field(default="", max_length=300)
+    dates: str = Field(default="", max_length=300)
+    bullets: List[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("name", "organization", "location", "dates", mode="before")
+    @classmethod
+    def clean_short_text(cls, value: Any) -> str:
+        return _clean_text(value, max_length=300)
+
+    @field_validator("bullets", mode="before")
+    @classmethod
+    def clean_bullets(cls, value: Any) -> List[str]:
+        return _clean_text_list(value, max_items=8, max_length=2_000)
+
+
+class VolunteerExperienceItem(StrictBaseModel):
+    role: str = Field(default="", max_length=300)
+    organization: str = Field(default="", max_length=300)
+    location: str = Field(default="", max_length=300)
+    dates: str = Field(default="", max_length=300)
+    bullets: List[str] = Field(default_factory=list, max_length=8)
+
+    @field_validator("role", "organization", "location", "dates", mode="before")
+    @classmethod
+    def clean_short_text(cls, value: Any) -> str:
+        return _clean_text(value, max_length=300)
+
+    @field_validator("bullets", mode="before")
+    @classmethod
+    def clean_bullets(cls, value: Any) -> List[str]:
+        return _clean_text_list(value, max_items=8, max_length=2_000)
+
+
+class CertificationItem(StrictBaseModel):
+    name: str = Field(default="", max_length=300)
+    issuer: str = Field(default="", max_length=300)
+    dates: str = Field(default="", max_length=300)
+    details: str = Field(default="", max_length=2_000)
+
+    @field_validator("name", "issuer", "dates", mode="before")
+    @classmethod
+    def clean_short_text(cls, value: Any) -> str:
+        return _clean_text(value, max_length=300)
+
+    @field_validator("details", mode="before")
+    @classmethod
+    def clean_details(cls, value: Any) -> str:
+        return _clean_text(value, max_length=2_000)
+
+
 class EducationItem(StrictBaseModel):
     institution: str = Field(default="", max_length=300)
     degree: str = Field(default="", max_length=300)
@@ -72,6 +125,9 @@ class EducationItem(StrictBaseModel):
 class ResumeSchema(StrictBaseModel):
     professional_summary: str = Field(default="", max_length=8_000)
     work_experience: List[WorkExperience] = Field(default_factory=list, max_length=20)
+    projects: List[ProjectItem] = Field(default_factory=list, max_length=20)
+    volunteer_experience: List[VolunteerExperienceItem] = Field(default_factory=list, max_length=20)
+    certifications: List[CertificationItem] = Field(default_factory=list, max_length=20)
     education: List[EducationItem] = Field(default_factory=list, max_length=10)
     skills: List[str] = Field(default_factory=list, max_length=80)
 

@@ -145,27 +145,42 @@ def get_user_input() -> Dict[str, Any]:
         "full_name": prompt_required("Full Name"),
         "contact_info": prompt_required("Contact Info (Email, Phone, LinkedIn)"),
         "summary": prompt_required(
-            "Summary (1-2 sentences highlighting your experience and goals)"
+            "Summary (1-2 sentences highlighting your target role, key skills, or goals)"
         ),
         "work_experience": [],
+        "no_work_experience": False,
+        "alternative_experience_text": "",
+        "projects": [],
+        "volunteer_experience": [],
+        "certifications": [],
         "education": [],
         "skills": [],
     }
 
     print("\nWork Experience")
-    while True:
-        add_item = input("Add work experience? [y/n]: ").strip().lower()
-        if add_item != "y":
-            break
+    has_experience = prompt_yes_no("Do you have previous work experience?", default="y")
+    data["no_work_experience"] = not has_experience
+    
+    if has_experience:
+        while True:
+            add_item = input("Add work experience? [y/n]: ").strip().lower()
+            if add_item != "y":
+                break
 
-        data["work_experience"].append(
-            {
-                "title": prompt_required("Title"),
-                "company": prompt_required("Company"),
-                "location": prompt_required("Location"),
-                "dates": prompt_required("Dates"),
-                "bullets": collect_bullets(),
-            }
+            data["work_experience"].append(
+                {
+                    "title": prompt_required("Title"),
+                    "company": prompt_required("Company"),
+                    "location": prompt_required("Location"),
+                    "dates": prompt_required("Dates"),
+                    "bullets": collect_bullets(),
+                }
+            )
+    else:
+        print("\nNo problem! You can still create a strong resume with education, certifications, projects, and skills.")
+        print("Consider highlighting any internships, volunteer work, coursework, or personal projects instead.")
+        data["alternative_experience_text"] = prompt_multiline(
+            "Describe internships, projects, volunteering, coursework, or other relevant experience"
         )
 
     print("\nEducation")
@@ -176,10 +191,57 @@ def get_user_input() -> Dict[str, Any]:
 
         data["education"].append(
             {
-                "institution": prompt_required("Institution"),
-                "degree": prompt_required("Degree"),
+                "institution": prompt_required("School/Program/Provider"),
+                "degree": prompt_required("Credential (GED, diploma, degree, certification)"),
                 "dates": prompt_optional("Dates"),
                 "location": prompt_required("Location"),
+                "details": prompt_optional("Details (coursework, honors, achievements, certifications)"),
+            }
+        )
+
+    print("\nProjects")
+    while True:
+        add_item = input("Add project? [y/n]: ").strip().lower()
+        if add_item != "y":
+            break
+
+        data["projects"].append(
+            {
+                "name": prompt_required("Project Name"),
+                "organization": prompt_optional("Organization / School"),
+                "location": prompt_optional("Location"),
+                "dates": prompt_optional("Dates"),
+                "bullets": collect_bullets(),
+            }
+        )
+
+    print("\nVolunteer Experience")
+    while True:
+        add_item = input("Add volunteer experience / leadership / club entry? [y/n]: ").strip().lower()
+        if add_item != "y":
+            break
+
+        data["volunteer_experience"].append(
+            {
+                "role": prompt_required("Role"),
+                "organization": prompt_required("Organization"),
+                "location": prompt_optional("Location"),
+                "dates": prompt_optional("Dates"),
+                "bullets": collect_bullets(),
+            }
+        )
+
+    print("\nCertifications")
+    while True:
+        add_item = input("Add certification / license / bootcamp? [y/n]: ").strip().lower()
+        if add_item != "y":
+            break
+
+        data["certifications"].append(
+            {
+                "name": prompt_required("Certification Name"),
+                "issuer": prompt_optional("Issuer"),
+                "dates": prompt_optional("Dates"),
                 "details": prompt_optional("Details"),
             }
         )
@@ -278,14 +340,14 @@ def maybe_run_ats_verification(
     args: argparse.Namespace,
     resume: Dict[str, Any],
     api_key: str,
-) -> None:
-    should_verify = args.verify or prompt_yes_no(
+) -> Optional[Dict[str, Any]]:
+    should_verify = args.verify or args.ats_fix or prompt_yes_no(
         "Run ATS verification checker?",
         default="n",
     )
 
     if not should_verify:
-        return
+        return None
 
     target_role = prompt_optional("Target Role for ATS check")
     job_description = prompt_multiline(
@@ -306,13 +368,90 @@ def maybe_run_ats_verification(
     else:
         print_ats_verification_report(verification_report)
 
+    return verification_report
+
+
+def build_ats_fix_revision_notes(report: Dict[str, Any]) -> str:
+    missing_keywords = report.get("missing_keywords", []) or []
+    formatting_feedback = report.get("formatting_feedback", []) or []
+    content_feedback = report.get("content_feedback", []) or []
+    overall_recommendation = str(report.get("overall_recommendation", "")).strip()
+
+    lines = [
+        "Revise this resume using ATS suggestions while preserving truthful facts, dates, and credentials.",
+        "Improve role alignment and keyword match where accurate.",
+    ]
+
+    if overall_recommendation:
+        lines.append(f"Overall recommendation: {overall_recommendation}")
+
+    if missing_keywords:
+        lines.append("Missing keywords to incorporate where accurate:")
+        for kw in missing_keywords:
+            lines.append(f"- {kw}")
+
+    if content_feedback:
+        lines.append("Content improvements:")
+        for item in content_feedback:
+            lines.append(f"- {item}")
+
+    if formatting_feedback:
+        lines.append("Formatting improvements:")
+        for item in formatting_feedback:
+            lines.append(f"- {item}")
+
+    lines.append("Do not fabricate employers, metrics, dates, or education.")
+    return "\n".join(lines).strip()
+
+
+def maybe_apply_ats_fixes(
+    *,
+    args: argparse.Namespace,
+    ats_report: Optional[Dict[str, Any]],
+    resume: Dict[str, Any],
+    raw_data: Dict[str, Any],
+    api_key: str,
+    base_path: Optional[Path],
+) -> Dict[str, Any]:
+    if not ats_report:
+        return resume
+
+    should_fix = args.ats_fix or prompt_yes_no(
+        "Revise resume using ATS suggestions?",
+        default="n",
+    )
+
+    if not should_fix:
+        return resume
+
+    revised = revise_resume_content(
+        api_key=api_key,
+        revision_notes=build_ats_fix_revision_notes(ats_report),
+        raw_data=raw_data,
+        current_resume=resume,
+    )
+
+    candidate = revised.get("candidate", {})
+    raw_data["full_name"] = candidate.get("full_name", raw_data.get("full_name", ""))
+    raw_data["contact_info"] = candidate.get("contact_info", raw_data.get("contact_info", ""))
+    updated_resume = revised["resume"]
+
+    if args.dry_run:
+        logger.info("DRY RUN: Outputting ATS-fixed Resume JSON:")
+        print(json.dumps(updated_resume, indent=2))
+    elif base_path is not None:
+        save_resume_files(updated_resume, raw_data, base_path, args.format, args)
+        logger.info("ATS suggestions applied and output files updated.")
+
+    return updated_resume
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate an ATS-optimized resume and optional cover letter with Gemini."
     )
     parser.add_argument(
         "--check",
-        choices=["generate", "revise", "ats", "all"],
+        choices=["generate", "revise", "ats", "ats_fix", "all"],
         help="Run non-interactive API health checks and exit.",
     )
     parser.add_argument(
@@ -342,9 +481,14 @@ def parse_args() -> argparse.Namespace:
         help="Automatically generate a tailored cover letter after resume creation or revision.",
     )
     parser.add_argument(
-        "--verify",
+        "--ats",
         action="store_true",
         help="Run ATS verification checker on the finalized resume.",
+    )
+    parser.add_argument(
+        "--ats-fix",
+        action="store_true",
+        help="After ATS verification, revise the resume using ATS suggestions.",
     )
     parser.add_argument(
         "--input",
@@ -455,6 +599,36 @@ def run_api_checks(check: str, api_key: str) -> None:
                 ],
             }
         ],
+        "projects": [
+            {
+                "name": "API Observability Dashboard",
+                "organization": "Check Corp",
+                "location": "Remote",
+                "dates": "2024",
+                "bullets": [
+                    "Built a dashboard to track API latency and error rates across services.",
+                ],
+            }
+        ],
+        "volunteer_experience": [
+            {
+                "role": "Volunteer Mentor",
+                "organization": "Code for Good",
+                "location": "Remote",
+                "dates": "2023-Present",
+                "bullets": [
+                    "Mentored students through weekly Python and web development sessions.",
+                ],
+            }
+        ],
+        "certifications": [
+            {
+                "name": "AWS Cloud Practitioner",
+                "issuer": "Amazon Web Services",
+                "dates": "2024",
+                "details": "Validated foundational cloud knowledge.",
+            }
+        ],
         "education": [
             {
                 "institution": "State University",
@@ -473,6 +647,8 @@ def run_api_checks(check: str, api_key: str) -> None:
             "full_name": "Check Candidate",
             "contact_info": "check@example.com | 555-0100",
             "summary": "Backend engineer with Python and Django experience.",
+            "no_work_experience": False,
+            "alternative_experience_text": "",
             "work_experience": [
                 {
                     "title": "Software Engineer",
@@ -480,6 +656,32 @@ def run_api_checks(check: str, api_key: str) -> None:
                     "location": "Remote",
                     "dates": "2022-Present",
                     "bullets": ["Built APIs and reduced response times by 30%."],
+                }
+            ],
+            "projects": [
+                {
+                    "name": "API Observability Dashboard",
+                    "organization": "Check Corp",
+                    "location": "Remote",
+                    "dates": "2024",
+                    "bullets": ["Built dashboard views for latency and error trends."],
+                }
+            ],
+            "volunteer_experience": [
+                {
+                    "role": "Volunteer Mentor",
+                    "organization": "Code for Good",
+                    "location": "Remote",
+                    "dates": "2023-Present",
+                    "bullets": ["Mentored students through weekly Python workshops."],
+                }
+            ],
+            "certifications": [
+                {
+                    "name": "AWS Cloud Practitioner",
+                    "issuer": "Amazon Web Services",
+                    "dates": "2024",
+                    "details": "Validated foundational cloud knowledge.",
                 }
             ],
             "education": [
@@ -496,16 +698,18 @@ def run_api_checks(check: str, api_key: str) -> None:
         generate_resume_content(sample_raw_data, api_key)
         logger.info("Generation API check passed.")
 
-    if check in {"ats", "all"}:
+    ats_report = None
+    if check in {"ats", "ats_fix", "all"}:
         logger.info("Running ATS API check...")
-        verify_ats_compatibility(
+        ats_report = verify_ats_compatibility(
             resume=sample_resume,
             target_role="Backend Engineer",
             job_description="Seeking Python, Django, SQL, API performance, and CI/CD experience.",
             api_key=api_key,
         )
         logger.info("ATS API check passed.")
-    if check == "revise":
+
+    if check in {"revise", "all"}:
         logger.info("Running revision API check...")
         revise_resume_content(
             api_key=api_key,
@@ -513,6 +717,42 @@ def run_api_checks(check: str, api_key: str) -> None:
             current_resume=sample_resume,
         )
         logger.info("Revision API check passed.")
+
+    if check in {"ats_fix", "all"}:
+        logger.info("Running ATS-fix API check...")
+        if not ats_report:
+            ats_report = verify_ats_compatibility(
+                resume=sample_resume,
+                target_role="Backend Engineer",
+                job_description=(
+                    "Seeking Python, Django, SQL, API performance, and CI/CD experience."
+                ),
+                api_key=api_key,
+            )
+
+        missing_keywords = ats_report.get("missing_keywords", []) or []
+        formatting_feedback = ats_report.get("formatting_feedback", []) or []
+        content_feedback = ats_report.get("content_feedback", []) or []
+        overall_recommendation = ats_report.get("overall_recommendation", "")
+
+        ats_fix_notes = [
+            "Revise this resume using ATS suggestions while preserving truthful facts.",
+        ]
+        if overall_recommendation:
+            ats_fix_notes.append(f"Overall recommendation: {overall_recommendation}")
+        if missing_keywords:
+            ats_fix_notes.append("Missing keywords to incorporate where accurate: " + ", ".join(missing_keywords))
+        if content_feedback:
+            ats_fix_notes.append("Content feedback: " + " | ".join(content_feedback))
+        if formatting_feedback:
+            ats_fix_notes.append("Formatting feedback: " + " | ".join(formatting_feedback))
+
+        revise_resume_content(
+            api_key=api_key,
+            revision_notes="\n".join(ats_fix_notes),
+            current_resume=sample_resume,
+        )
+        logger.info("ATS-fix API check passed.")
 
 
 def main() -> None:
@@ -528,7 +768,6 @@ def main() -> None:
         if args.gdoc_id:
             creds = get_google_credentials()
             resume_text = get_gdoc_text(args.gdoc_id, creds)
-            
             revision_notes = ensure_revision_notes(args.notes or collect_revision_notes())
         else:
             input_path = args.input.expanduser().resolve()
@@ -554,10 +793,27 @@ def main() -> None:
         if args.dry_run:
             logger.info("DRY RUN: Outputting Revised Resume JSON:")
             print(json.dumps(resume, indent=2))
+            ats_report = maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
+            resume = maybe_apply_ats_fixes(
+                args=args,
+                ats_report=ats_report,
+                resume=resume,
+                raw_data=raw_data,
+                api_key=api_key,
+                base_path=None,
+            )
         else:
             base_path = get_base_path(args.output, raw_data.get("full_name", ""), args.dir)
             save_resume_files(resume, raw_data, base_path, args.format, args)
-            maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
+            ats_report = maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
+            resume = maybe_apply_ats_fixes(
+                args=args,
+                ats_report=ats_report,
+                resume=resume,
+                raw_data=raw_data,
+                api_key=api_key,
+                base_path=base_path,
+            )
 
         should_generate_cl = args.cl or prompt_yes_no(
             "Generate a tailored Cover Letter from the revised resume?",
@@ -613,10 +869,27 @@ def main() -> None:
     if args.dry_run:
         logger.info("DRY RUN: Outputting Final Resume JSON:")
         print(json.dumps(resume, indent=2))
+        ats_report = maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
+        resume = maybe_apply_ats_fixes(
+            args=args,
+            ats_report=ats_report,
+            resume=resume,
+            raw_data=raw_data,
+            api_key=api_key,
+            base_path=None,
+        )
     else:
         base_path = get_base_path(args.output, raw_data.get("full_name", ""), args.dir)
         save_resume_files(resume, raw_data, base_path, args.format, args)
-        maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
+        ats_report = maybe_run_ats_verification(args=args, resume=resume, api_key=api_key)
+        resume = maybe_apply_ats_fixes(
+            args=args,
+            ats_report=ats_report,
+            resume=resume,
+            raw_data=raw_data,
+            api_key=api_key,
+            base_path=base_path,
+        )
 
     should_generate_cl = args.cl or prompt_yes_no(
         "Generate a tailored Cover Letter from the final resume?",
