@@ -18,14 +18,19 @@ A Python application that generates and revises ATS-optimized resumes and tailor
 - **Cover Letter Generation** — Optionally generate a role-specific cover letter tailored to a target company and position.
 - **Resume Revision** — Feed an existing `.docx` or **Google Doc** with revision notes and let Gemini rewrite and improve it. Supports natural language instructions such as reordering jobs, rewriting the summary, or changing details.
 - **ATS Verification** — After generating or revising a resume, run it through a dedicated ATS checker powered by Gemini. The checker scores your resume out of 100, identifies missing keywords against a job description, and gives specific formatting and content feedback.
+- **Automated ATS Fix** — Automatically apply the feedback from the ATS Verification step to rewrite and improve your resume using ATS suggestions.
 - **Google Drive Integration** — Pick any Google Doc from your Drive directly in the browser via the **Google Picker API**, powered by Google Identity Services (GIS) and FedCM-compatible OAuth 2.0.
 - **Multiple Output Formats** — Export to `.pdf`, `.docx`, both simultaneously, or directly to **Google Docs** via the Google Drive API.
 - **Dry-Run Mode** — Preview the generated JSON output without writing any files.
-- **API Check Mode** — Run `generate`, `revise`, and `ats` checks independently from the CLI without creating files or completing the full workflow.
+- **API Check Mode** — Run `generate`, `revise`, `ats`, and `ats_fix` checks independently from the CLI without creating files or completing the full workflow.
 - **Revision Diff Summary** — See a structured log of exactly what changed between resume versions.
 - **Web UI** — A Django-powered browser interface supporting form-based generation, file uploads, and Google Drive file selection.
 - **Pydantic Schema Validation** — Every Gemini response is validated against strict Pydantic v2 models before any file is written.
 - **Structured Logging** — All errors and status messages use Python's standard `logging` module for easy redirection.
+- **User Accounts & Profiles** — Create an account, log in, and manage your user profile and settings directly in the Web UI.
+- **Saved Documents** — Generated resumes and cover letters are securely saved to your account in the database for easy retrieval and version tracking.
+- **"No Work Experience" Support** — Dedicated processing and system prompts for candidates without formal work experience, using coursework, personal projects, and extracurriculars to craft strong ATS-friendly bullets.
+- **Additional Sections** — Native support for distinct **Projects**, **Volunteer Experience / Leadership**, and **Certifications** sections across the Web UI, CLI, and generated PDF/DOCX documents.
 
 ## Project Structure
 
@@ -56,16 +61,23 @@ resume-gen/
 │   ├── test_document.py # Document generation and mocking tests
 │   ├── test_llm.py      # Pydantic schema validation and Gemini mocking
 │   ├── test_google_drive.py # Drive API mocking
-│   └── test_security.py # Validation and boundary security testing
+│   ├── test_security.py # Validation and boundary security testing
+│   ├── test_jobs.py     # Background tasks and async jobs testing
+│   └── test_views.py    # Web UI views and endpoints testing
 ├── builder/             # Django app — Web UI
 │   ├── views.py         # generate, verify_ats, google_login, google_callback views
+│   ├── models.py        # Database models for Users, Profiles, Resumes, and Cover Letters
 │   ├── utils.py         # Bridge between Django and services/
 │   ├── jobs.py          # Background tasks and async processes
 │   ├── urls.py
 │   ├── apps.py
+│   ├── migrations/      # Database migrations
 │   └── templates/
 │       └── builder/
-│           └── index.html
+│           ├── index.html
+│           ├── login.html
+│           ├── profile.html
+│           └── register.html
 ├── static/              # Static assets (CSS, JS, images)
 ├── examples/            # Sample output files for reference
 └── resumes/             # Default output directory for generated files
@@ -172,13 +184,13 @@ python main.py
 ### Full Options
 
 ```text
-usage: main.py [-h] [--check {generate,revise,ats,all}] [--format {pdf,docx,both,gdocs}] [--output OUTPUT] [--dir DIR]
-               [--revise] [--cl] [--verify] [--input INPUT] [--gdoc-id GDOC_ID]
+usage: main.py [-h] [--check {generate,revise,ats,ats_fix,all}] [--format {pdf,docx,both,gdocs}] [--output OUTPUT] [--dir DIR]
+               [--revise] [--cl] [--ats] [--ats-fix] [--input INPUT] [--gdoc-id GDOC_ID]
                [--gdoc-update] [--notes NOTES] [--dry-run]
 
 options:
   -h, --help                    show this help message and exit
-  --check {generate,revise,ats,all}
+  --check {generate,revise,ats,ats_fix,all}
                                 Run non-interactive API health checks and exit.
   --format {pdf,docx,both,gdocs}
                                 Output format. 'gdocs' uploads the result directly
@@ -187,7 +199,8 @@ options:
   --dir DIR                     Target output directory. (default: ./resumes)
   --revise                      Prompt for revision notes after initial generation.
   --cl                          Generate a tailored cover letter after resume creation.
-  --verify                      Run the ATS verification checker on the finalized resume.
+  --ats                         Run the ATS verification checker on the finalized resume.
+  --ats-fix                     After ATS verification, revise the resume using ATS suggestions.
   --input INPUT                 Existing .docx resume to revise instead of starting from scratch.
   --gdoc-id GDOC_ID             Existing Google Doc ID to revise instead of a local file.
   --gdoc-update                 Update the target Google Doc in-place when used with --gdoc-id.
@@ -256,7 +269,7 @@ https://docs.google.com/document/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms/
 **Run ATS verification after generating:**
 
 ```bash
-python main.py --verify
+python main.py --ats
 ```
 
 After the resume is generated, you will be prompted to optionally enter a **Target Role** and paste a **Job Description**. The checker will then:
@@ -270,10 +283,17 @@ After the resume is generated, you will be prompted to optionally enter a **Targ
 
 Both fields are optional — leaving them blank runs a general ATS best-practices scan without job-specific keyword matching.
 
+**Automate ATS Fixes:**
+
+```bash
+python main.py --ats-fix
+```
+This runs the generation, followed by the ATS verification, and then **automatically feeds the ATS feedback back into the revision engine** to rewrite the resume incorporating the suggested keywords and feedback.
+
 **Generate, verify ATS, and write a cover letter in one pass:**
 
 ```bash
-python main.py --cl --verify
+python main.py --cl --ats
 ```
 
 **Preview output without saving:**
@@ -319,16 +339,19 @@ python manage.py runserver
 
 3. Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
 
-4. Choose a mode:
-   - **Build from Scratch** — Fill in your profile, work experience, education, and skills manually.
-   - **Revise Existing Resume** — Upload a `.docx` file or click **Select from Google Drive** to pick a Google Doc directly from your Drive. Enter revision notes and click **Generate Resume**.
+- **Register / Log In** — Create an account to securely save your generated resumes and cover letters, and to manage your profile.
 
+4. Choose a mode:
+   - **Build from Scratch** — Fill in your profile, work experience (or alternative experience/coursework if you have no formal work experience), projects, volunteer work, certifications, education, and skills manually.
+   - **Revise Existing Resume** — Upload a `.docx` file or click **Select from Google Drive** to pick a Google Doc directly from your Drive. Enter revision notes and click **Generate Resume**.
 5. Use the **Targeting & ATS** sidebar card to optionally provide:
    - **Target Role** — used by the cover letter generator and the ATS checker.
    - **Target Company** — used by the cover letter generator.
    - **Job Description** — paste the full job posting for precise keyword-gap analysis during ATS verification.
 
 6. Click **Check ATS Score** at any time to run ATS verification without downloading the resume. Results are displayed inline below the form with a color-coded score, missing keywords, and actionable feedback.
+
+7. Click **Fix Resume Using ATS Suggestions** (available after running an ATS check) to trigger an automated revision that completely rewrites your resume using the exact feedback and missing keywords from the ATS check.
 
 > **Note:** Always use `http://127.0.0.1:8000` (not `localhost`) during local development to match your OAuth authorized origins exactly.
 

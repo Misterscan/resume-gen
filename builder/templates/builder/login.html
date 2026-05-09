@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    {% load static %}
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/x-icon" href="{% static 'favicon.ico' %}">
     <title>Login - ResumeGen</title>
     <style>
         nav {
@@ -125,6 +127,7 @@
 
 <nav>
     <ul>
+        <img src="{% static 'favicon.ico' %}" alt="ResumeGen Logo" style="display: inline-block; width: 24px; height: 24px;">
         <li class="brand"><a href="{% url 'index' %}">ResumeGen</a></li>
         {% if user.is_authenticated %}
             <li><a href="{% url 'profile' %}">Welcome, {{ user.username }}</a></li>
