@@ -32,7 +32,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-3.1-pro-preview"
+MODEL_NAME = "gemini-3.7-flash"
 DEFAULT_REVISION_NOTES = (
     "Improve ATS clarity and wording while preserving all existing facts and sections."
 )

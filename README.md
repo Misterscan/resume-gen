@@ -5,7 +5,7 @@
 
 # ATS Resume Generator & Verification
 
-A Python application that generates and revises ATS-optimized resumes and tailored cover letters using Google's Gemini AI (`gemini-3.1-pro-preview`). Available as both a **CLI tool** and an interactive **Web UI** built with Django.
+A Python application that generates and revises ATS-optimized resumes and tailored cover letters using Google's Gemini AI (`gemini-3.7-flash`). Available as both a **CLI tool** and an interactive **Web UI** built with Django.
 
 ![ATS Resume Builder UI](examples/site-screenshot.png)
 
@@ -400,7 +400,7 @@ Process flow visualization:
 
 ![Architecture Visualization](examples/visualization.png)
 
-- Uses `google-genai` to interface with the Gemini 3.1 Pro Preview API.
+- Uses `google-genai` to interface with the Gemini 3.7 Flash API.
 - Generates structured resume data via Gemini's native JSON response mode, validated with **Pydantic v2** schemas.
 - Programmatically formats outputs locally via `python-docx` for MS Word compatibility and `fpdf2` for PDF generation.
 - Google Drive integration uses `google-api-python-client` with OAuth 2.0 PKCE flow to upload `.docx` files and convert them to native Google Docs format.

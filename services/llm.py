@@ -20,7 +20,7 @@ from .schemas import ResumeSchema, RevisionResponseSchema, CoverLetterSchema, At
 from .exceptions import IntegrationError, ServiceUnavailableError, ValidationError
 
 logger = logging.getLogger(__name__)
-MODEL_NAME = "gemini-3.1-pro-preview"
+MODEL_NAME = "gemini-3.7-flash"
 MAX_MODEL_PAYLOAD_CHARS = 120_000
 REQUEST_TIMEOUT_MS = 45_000
 ATS_REQUEST_TIMEOUT_MS = 120_000
@@ -43,7 +43,6 @@ class GeminiRequest:
     api_key: str
     system_prompt: str
     payload: Dict[str, Any]
-    temperature: float = 0.3
 
 
 def _serialize_payload(payload: Dict[str, Any]) -> str:
@@ -73,7 +72,6 @@ def call_gemini_json(
     api_key: str,
     system_prompt: str,
     payload: Dict[str, Any],
-    temperature: float = 0.3,
     request_timeout_ms: int = REQUEST_TIMEOUT_MS,
 ) -> Dict[str, Any]:
     body = _serialize_payload(payload)
@@ -88,10 +86,9 @@ def call_gemini_json(
             contents=body,
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
-                temperature=temperature,
                 response_mime_type="application/json",
                 thinking_config=types.ThinkingConfig(
-                    thinking_level=types.ThinkingLevel.LOW
+                    thinking_level=types.ThinkingLevel.MEDIUM
                 ),
             ),
         )
@@ -139,8 +136,7 @@ def generate_resume_content(
     parsed = call_gemini_json(
         api_key=api_key,
         system_prompt=system_prompt,
-        payload={"raw_data": raw_data},
-        temperature=0.3,
+        payload={"raw_data": raw_data}
     )
     try:
         validated = ResumeSchema.model_validate(parsed)
@@ -177,8 +173,7 @@ def revise_resume_content(
     result = call_gemini_json(
         api_key=api_key,
         system_prompt=REVISION_SYSTEM_PROMPT,
-        payload=payload,
-        temperature=0.2,
+        payload=payload
     )
 
     try:
@@ -211,8 +206,7 @@ def generate_cover_letter_content(
             "revision_notes": revision_notes or "",
             "target_role": target_role,
             "target_company": target_company,
-        },
-        temperature=0.4,
+        }
     )
     
     try:
@@ -237,7 +231,6 @@ def verify_ats_compatibility(
         api_key=api_key,
         system_prompt=ATS_VERIFICATION_SYSTEM_PROMPT,
         payload=payload,
-        temperature=0.1,
         request_timeout_ms=ATS_REQUEST_TIMEOUT_MS,
     )
     
