@@ -20,7 +20,7 @@ from .schemas import ResumeSchema, RevisionResponseSchema, CoverLetterSchema, At
 from .exceptions import IntegrationError, ServiceUnavailableError, ValidationError
 
 logger = logging.getLogger(__name__)
-MODEL_NAME = "gemini-3.7-flash"
+MODEL_NAME = "gemini-3.6-flash"
 MAX_MODEL_PAYLOAD_CHARS = 120_000
 REQUEST_TIMEOUT_MS = 45_000
 ATS_REQUEST_TIMEOUT_MS = 120_000
